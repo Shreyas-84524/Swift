@@ -1,8 +1,8 @@
-# Global OTP Platform — Multi-Phase Implementation Roadmap
+# Swift — Multi-Phase Implementation Roadmap
 
 ## Overview
 
-The transformation of the standalone Android SMS gateway into a multi-tenant Global OTP Platform is organized across five distinct phases.
+The transformation of the standalone Android SMS gateway into a multi-tenant Swift is organized across five distinct phases.
 
 ---
 

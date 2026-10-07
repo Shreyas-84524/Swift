@@ -1,4 +1,4 @@
-# Global OTP Platform — API Contract Specification
+# Swift — API Contract Specification
 
 **Version:** 1.0.0  
 **Base URL:** `https://<backend-domain>/api/v1`  

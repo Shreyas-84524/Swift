@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "sms"
+rootProject.name = "Swift"
 include(":app")

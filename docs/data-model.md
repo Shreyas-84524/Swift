@@ -1,4 +1,4 @@
-# Global OTP Platform — Data Model & Schema Proposal
+# Swift — Data Model & Schema Proposal
 
 ## 1. Relational Entity Overview
 

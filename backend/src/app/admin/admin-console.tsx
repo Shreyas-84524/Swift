@@ -2,6 +2,10 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 
+function Brand() {
+  return <div className="brand"><img className="brand-mark" src="/swift-logo.png" alt="" width={48} height={48} /><span>Swift<span className="brand-caption">SMS & OTP CONSOLE</span></span></div>;
+}
+
 type KeyMeta = {
   id: string;
   key_prefix: string;
@@ -34,7 +38,7 @@ type Gateway = {
 };
 
 type Dashboard = {
-  admin: { display_name: string; phone_number: string };
+  admin: { display_name: string; email: string };
   projects: Project[];
   gateways: Gateway[];
   queue: { queued: number; claimed: number; sent: number; delivered: number; failed: number };
@@ -75,59 +79,8 @@ function SecretDialog({ secret, onClose }: { secret: string; onClose: () => void
   );
 }
 
-function Setup({ onComplete }: { onComplete: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    const form = new FormData(event.currentTarget);
-    try {
-      await api('/api/v1/admin/setup', {
-        method: 'POST',
-        body: JSON.stringify({
-          setup_token: form.get('setup_token'),
-          users: [1, 2].map((slot) => ({
-            display_name: form.get(`name_${slot}`),
-            phone: form.get(`phone_${slot}`),
-            password: form.get(`password_${slot}`),
-          })),
-        }),
-      });
-      onComplete();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Setup failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="auth-shell">
-      <section className="auth-panel setup-panel">
-        <div className="brand"><span className="brand-mark">R</span><span>Relay OTP</span></div>
-        <p className="eyebrow">One-time setup</p>
-        <h1>Secure the control plane</h1>
-        <p className="auth-copy">Create the only two accounts allowed to manage projects, API keys, and gateway devices.</p>
-        <form onSubmit={submit} className="stack">
-          <label>Setup token<input name="setup_token" type="password" required autoComplete="off" /></label>
-          <div className="setup-grid">
-            {[1, 2].map((slot) => (
-              <fieldset key={slot}>
-                <legend>Administrator {slot}</legend>
-                <label>Name<input name={`name_${slot}`} required maxLength={100} /></label>
-                <label>Phone number<input name={`phone_${slot}`} type="tel" placeholder="+91 98765 43210" required /></label>
-                <label>Password<input name={`password_${slot}`} type="password" minLength={12} required autoComplete="new-password" /></label>
-              </fieldset>
-            ))}
-          </div>
-          <p className="hint">Use 12+ characters with uppercase, lowercase, and a number.</p>
-          {error && <p className="error" role="alert">{error}</p>}
-          <button className="button primary wide" disabled={busy}>{busy ? 'Securing console...' : 'Create two accounts'}</button>
-        </form>
-      </section>
-    </main>
-  );
+function Setup() {
+  return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="eyebrow">Private workspace</p><h1>Owner access awaits</h1><p className="auth-copy">Connect Supabase Auth and provision the owner account to open your workspace. Public registration is disabled.</p><a className="button" href="/integration">Read the integration guide</a></section></main>;
 }
 
 function Login({ onLogin }: { onLogin: () => void }) {
@@ -141,7 +94,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
     try {
       await api('/api/v1/admin/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ phone: form.get('phone'), password: form.get('password') }),
+        body: JSON.stringify({ email: form.get('email'), password: form.get('password') }),
       });
       onLogin();
     } catch (cause) {
@@ -151,18 +104,20 @@ function Login({ onLogin }: { onLogin: () => void }) {
     }
   }
   return (
-    <main className="auth-shell">
+    <main className="auth-shell login-shell">
+      <aside className="auth-story"><Brand /><div className="story-body"><p className="eyebrow">MESSAGING, BEAUTIFULLY CONNECTED</p><h2>A small code.<br/> A seamless<br/> <em>connection.</em></h2><p>Your applications. Your devices. One considered workspace for every verification.</p></div><div className="story-footer"><span className="story-line"/> BUILT TO KEEP YOU CONNECTED <span>01 / SWIFT</span></div></aside>
       <section className="auth-panel login-panel">
-        <div className="brand"><span className="brand-mark">R</span><span>Relay OTP</span></div>
-        <p className="eyebrow">Private console</p>
-        <h1>Welcome back</h1>
-        <p className="auth-copy">Sign in with one of the two authorized accounts.</p>
+        <Brand />
+        <p className="eyebrow">OWNER ACCESS · SUPABASE AUTH</p>
+        <h1>Your workspace,<br/>ready for takeoff.</h1>
+        <p className="auth-copy">Sign in to manage your projects, gateway devices, and verification flow.</p>
         <form onSubmit={submit} className="stack">
-          <label>Phone number<input name="phone" type="tel" placeholder="9869789060 or +919869789060" autoComplete="tel" required autoFocus /></label>
+          <label>Email address<input name="email" type="email" placeholder="you@example.com" autoComplete="username" required autoFocus /></label>
           <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
           {error && <p className="error" role="alert">{error}</p>}
-          <button className="button primary wide" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'}</button>
+          <button className="button primary wide" disabled={busy}>{busy ? 'Signing in...' : 'Enter workspace →'}</button>
         </form>
+        <p className="auth-footer">Building with Swift? <a href="/integration">Explore the integration guide ↗</a></p>
       </section>
     </main>
   );
@@ -207,7 +162,7 @@ function ProjectsView({ data, refresh, reveal }: { data: Dashboard; refresh: () 
         <form className="create-form" onSubmit={createProject}>
           <label>Project name<input name="name" required placeholder="Storefront" /></label>
           <label>Slug<input name="slug" required placeholder="storefront" pattern="[a-z0-9][a-z0-9-]{1,48}[a-z0-9]" /></label>
-          <label className="span-2">SMS template<input name="sms_template" defaultValue="Your verification code is {{otp}}. It expires in {{expiry_minutes}} minutes." required /></label>
+          <label className="span-2">SMS template<input name="sms_template" defaultValue="Your {PROJECT_NAME} code is {OTP}. It expires in {EXPIRY_MINUTES} minutes." required /></label>
           <label>Cooldown (seconds)<input name="cooldown_seconds" type="number" defaultValue="30" min="10" max="3600" /></label>
           <label>Hourly limit / phone<input name="hourly_limit" type="number" defaultValue="5" min="1" max="100" /></label>
           {error && <p className="error span-2">{error}</p>}
@@ -275,11 +230,11 @@ function GatewaysView({ data, refresh, reveal }: { data: Dashboard; refresh: () 
 
 function IntegrationView() {
   const origin = typeof window === 'undefined' ? 'https://your-domain.vercel.app' : window.location.origin;
-  return <section className="content-section docs"><div className="section-heading"><div><p className="eyebrow">API reference</p><h2>Connect an application</h2><p>Call Relay OTP from your website&apos;s backend. Keep the project key in server-side environment variables.</p></div></div>
+  return <section className="content-section docs"><div className="section-heading"><div><p className="eyebrow">API reference</p><h2>Connect an application</h2><p><a href="/integration">Open the complete integration guide ↗</a></p><p>Call Swift from your website&apos;s backend. Keep the project key in server-side environment variables.</p></div></div>
     <div className="endpoint"><span className="method">POST</span><code>{origin}/api/v1/otp/send</code></div>
-    <pre>{`curl -X POST ${origin}/api/v1/otp/send \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: $RELAY_OTP_KEY" \\\n  -d '{"phone":"+919876543210"}'`}</pre>
+    <pre>{`curl -X POST ${origin}/api/v1/otp/send \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: $SWIFT_PROJECT_KEY" \\\n  -d '{"phone":"+919876543210"}'`}</pre>
     <div className="endpoint"><span className="method">POST</span><code>{origin}/api/v1/otp/verify</code></div>
-    <pre>{`curl -X POST ${origin}/api/v1/otp/verify \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: $RELAY_OTP_KEY" \\\n  -d '{"phone":"+919876543210","request_id":"...","otp":"123456"}'`}</pre>
+    <pre>{`curl -X POST ${origin}/api/v1/otp/verify \\\n  -H "Content-Type: application/json" \\\n  -H "X-Project-Key: $SWIFT_PROJECT_KEY" \\\n  -d '{"phone":"+919876543210","request_id":"...","otp":"123456"}'`}</pre>
     <aside className="notice"><strong>Gateway keys are infrastructure credentials.</strong><span>Use them only inside the Android gateway app. Never put them in a website, browser bundle, or client app.</span></aside>
   </section>;
 }
@@ -317,23 +272,24 @@ export default function AdminConsole() {
     setDashboard(null); setView('login');
   }
 
-  if (view === 'loading') return <main className="loading-screen"><div className="loader"/><p>{error || 'Loading Relay OTP...'}</p></main>;
-  if (view === 'setup') return <Setup onComplete={() => setView('login')} />;
+  if (view === 'loading') return <main className="loading-screen"><Brand /><div className="loader"/><p role={error ? "alert" : "status"}>{error || 'Loading Swift...'}</p>{error && <button className="button" onClick={() => window.location.reload()}>Try again</button>}</main>;
+  if (view === 'setup') return <Setup />;
   if (view === 'login') return <Login onLogin={loadDashboard} />;
   if (!dashboard) return <main className="loading-screen"><p>{error || 'Dashboard unavailable'}</p><button className="button" onClick={loadDashboard}>Retry</button></main>;
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">R</span><span>Relay OTP</span></div>
+      <Brand />
       <nav aria-label="Admin sections">
-        <button className={tab === 'projects' ? 'active' : ''} onClick={() => setTab('projects')}><span>▦</span>Projects</button>
-        <button className={tab === 'gateways' ? 'active' : ''} onClick={() => setTab('gateways')}><span>▣</span>Gateways</button>
-        <button className={tab === 'integration' ? 'active' : ''} onClick={() => setTab('integration')}><span>&lt;/&gt;</span>Integration</button>
+        <button aria-current={tab === 'projects' ? 'page' : undefined} className={tab === 'projects' ? 'active' : ''} onClick={() => setTab('projects')}><span>▦</span>Projects</button>
+        <button aria-current={tab === 'gateways' ? 'page' : undefined} className={tab === 'gateways' ? 'active' : ''} onClick={() => setTab('gateways')}><span>▣</span>Gateways</button>
+        <button aria-current={tab === 'integration' ? 'page' : undefined} className={tab === 'integration' ? 'active' : ''} onClick={() => setTab('integration')}><span>&lt;/&gt;</span>Integration</button>
       </nav>
-      <div className="user-panel"><div className="avatar">{dashboard.admin.display_name.slice(0, 1).toUpperCase()}</div><div><strong>{dashboard.admin.display_name}</strong><span>{dashboard.admin.phone_number}</span></div><button title="Sign out" aria-label="Sign out" onClick={logout}>↪</button></div>
+      <div className="user-panel"><div className="avatar">{dashboard.admin.display_name.slice(0, 1).toUpperCase()}</div><div><strong>{dashboard.admin.display_name}</strong><span>{dashboard.admin.email}</span></div><button title="Sign out" aria-label="Sign out" onClick={logout}>↪</button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div><span className="health-dot"/>Service operational</div><div className="queue-strip"><span><b>{dashboard.queue.queued}</b> queued</span><span><b>{dashboard.queue.claimed}</b> processing</span><span><b>{dashboard.queue.failed}</b> failed</span></div></header>
+      <header className="topbar"><div><span className="health-dot"/>Swift workspace</div><div className="queue-strip"><span><b>{dashboard.queue.queued}</b> queued</span><span><b>{dashboard.queue.claimed}</b> processing</span><span><b>{dashboard.queue.failed}</b> failed</span></div></header>
+      <section className="workspace-overview" aria-label="Workspace overview"><div className="overview-title"><p className="eyebrow">THE SWIFT WORKSPACE</p><h1>Everything, in flight.</h1><p>A clear view of your messaging infrastructure.</p></div><div className="metric-grid"><article><span>Projects</span><strong>{dashboard.projects.length.toString().padStart(2, '0')}</strong><small>Connected applications</small></article><article><span>Online gateways</span><strong>{dashboard.gateways.filter(g => g.is_online && g.is_active).length.toString().padStart(2, '0')}</strong><small>Ready to carry your messages</small></article><article><span>Delivered messages</span><strong>{dashboard.queue.delivered.toLocaleString()}</strong><small>Reported by your gateways</small></article></div></section>
       {error && <p className="global-error">{error}</p>}
       {tab === 'projects' && <ProjectsView data={dashboard} refresh={loadDashboard} reveal={setSecret} />}
       {tab === 'gateways' && <GatewaysView data={dashboard} refresh={loadDashboard} reveal={setSecret} />}

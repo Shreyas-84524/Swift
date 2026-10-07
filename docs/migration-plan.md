@@ -1,4 +1,4 @@
-# Global OTP Platform — Migration & Backward Compatibility Plan
+# Swift — Migration & Backward Compatibility Plan
 
 ## 1. Migration Overview
 

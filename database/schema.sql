@@ -56,20 +56,8 @@ CREATE TABLE IF NOT EXISTS gateway_api_keys (
     revoked_at TIMESTAMPTZ NULL
 );
 
--- 5. Private administrator accounts. Slots enforce a maximum of two users.
-CREATE TABLE IF NOT EXISTS admin_users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    slot SMALLINT NOT NULL UNIQUE CHECK (slot IN (1, 2)),
-    phone_number VARCHAR(20) NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    display_name VARCHAR(100) NOT NULL,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_login_at TIMESTAMPTZ NULL
-);
-
--- Login attempts are retained briefly for database-backed throttling.
+-- 5. Browser login uses a single server-configured owner.
+-- Store only the login-attempt audit/rate-limit records in PostgreSQL.
 CREATE TABLE IF NOT EXISTS admin_login_attempts (
     id BIGSERIAL PRIMARY KEY,
     identity_hash VARCHAR(64) NOT NULL,

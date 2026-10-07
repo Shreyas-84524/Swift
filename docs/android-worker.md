@@ -49,7 +49,7 @@ To achieve true, reliable 24/7 operation on consumer and dedicated devices witho
 ```text
 Client Application (CivicFix / Hostix)
         ↓ HTTPS POST /api/v1/otp/send
-Global OTP Cloud Backend
+Swift Cloud Backend
         ↓ 1. Persists challenge & creates sms_job (QUEUED)
         ↓ 2. Sends High-Priority FCM Push Wake Signal (containing jobId)
 Android Gateway Device

@@ -1,44 +1,9 @@
-# Global OTP Platform — Cloud Backend
+# Swift backend
 
-## 1. Overview
-The Global OTP Cloud Backend is a multi-tenant, serverless API designed for deployment on **Vercel**, backed by a **PostgreSQL** database (Supabase or Neon).
+Next.js website, Supabase Auth owner login, and OTP/gateway API.
 
-## 2. Technology Stack Selection & Justification
+See the root [README](../README.md) for setup, deployment, and validation; the [integration guide](../docs/integration-guide.md) covers client applications.
 
-| Layer | Selected Technology | Rationale |
-| :--- | :--- | :--- |
-| **Runtime / Platform** | **Vercel Serverless (Node.js / Edge)** | Zero server maintenance, free hobby/student tier, automated CI/CD deployments from Git, global CDN edge routing, zero-config HTTPS. |
-| **Language** | **TypeScript** | Strict static type checking, shared types between contracts and backend logic, rich modern ecosystem. |
-| **API Framework** | **Next.js Route Handlers / Fastify** | Lightweight, high-performance request processing, zero cold-start overhead with Vercel Edge/Serverless functions. |
-| **Database** | **PostgreSQL on Supabase** (Recommended) | - Free tier with 500MB storage (adequate for millions of OTP challenge records)<br>- Built-in connection pooling (Supavisor)<br>- Rich dashboard for monitoring records and inspecting queues<br>- Native JSONB, UUID, and `SKIP LOCKED` concurrency support |
-| **ORM / Query Builder** | **Kysely / Drizzle ORM** | Type-safe, ultra-lightweight SQL query builders with minimal runtime overhead and zero binary engine dependencies (ideal for serverless cold starts). |
+Commands: `npm run dev`, `npm run build`, `npm test`, `npm run test:owner`, `npm run owner:configure`.
 
-## 3. Directory Structure (To Be Implemented in Phase 2)
-
-```text
-backend/
-├── src/
-│   ├── app/                      # Next.js App Router API endpoints
-│   │   ├── api/
-│   │   │   ├── v1/
-│   │   │   │   ├── otp/
-│   │   │   │   │   ├── send/route.ts
-│   │   │   │   │   └── verify/route.ts
-│   │   │   │   ├── gateway/
-│   │   │   │   │   ├── jobs/
-│   │   │   │   │   │   ├── route.ts
-│   │   │   │   │   │   └── [jobId]/status/route.ts
-│   │   │   │   │   └── heartbeat/route.ts
-│   │   │   │   └── health/route.ts
-│   ├── lib/
-│   │   ├── db/                   # Database client & connection pooling
-│   │   ├── auth/                 # API key verification & SHA-256 hashing
-│   │   ├── otp/                  # CSPRNG generation & salt hashing
-│   │   └── queue/                # Job lease manager & sweeper
-│   └── types/                    # Shared TypeScript interfaces
-├── package.json
-├── tsconfig.json
-└── vercel.json
-```
-
-*Note: Phase 1 establishes the architectural foundation. Full backend source implementation will occur in Phase 2.*
+Runtime: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SWIFT_OWNER_USER_ID`, `SWIFT_OWNER_EMAIL`. Exactly one confirmed Supabase user UUID is authorized for the console. Public registration and custom password authentication are disabled.

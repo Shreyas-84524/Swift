@@ -1,4 +1,4 @@
-# SMS Gateway API Documentation
+# Swift API Documentation
 
 ## Overview
 
@@ -37,7 +37,7 @@ Returns basic information about the API server.
 **Response:**
 ```json
 {
-  "app_name": "SMS Gateway",
+  "app_name": "Swift",
   "version": "1.0.0",
   "status": "active",
   "endpoints": [

@@ -1,6 +1,6 @@
 # Developer & Admin Utility Scripts
 
-This directory will contain administrative and developer helper scripts for the **Global OTP Platform**.
+This directory will contain administrative and developer helper scripts for the **Swift**.
 
 ## Planned Scripts (Phases 2–4)
 - `generate-key.ts`: Generates a cryptographically secure API key pair (project or gateway) and outputs the hash for manual DB seeding.

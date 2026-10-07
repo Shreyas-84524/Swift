@@ -1,3 +1,4 @@
+-- HISTORICAL MIGRATION: retired phone-based accounts; not used by Swift owner login.
 -- Private two-user admin portal migration.
 -- Safe to run repeatedly in the Supabase SQL editor.
 

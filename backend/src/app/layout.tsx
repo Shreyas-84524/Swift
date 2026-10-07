@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Relay OTP Console',
-  description: 'Private control plane for the global OTP gateway',
+  applicationName: 'Swift',
+  title: 'Swift | SMS & OTP Console',
+  description: 'Swift brings your projects, API keys, and SMS gateway devices into one secure workspace.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

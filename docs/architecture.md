@@ -1,8 +1,8 @@
-# Global OTP Platform Architecture
+# Swift Architecture
 
 ## 1. Executive Summary
 
-This document specifies the target architecture for the **Global OTP Platform**, transitioning from a standalone, local Android HTTP SMS gateway into a multi-project, centralized OTP generation and delivery infrastructure.
+This document specifies the target architecture for the **Swift**, transitioning from a standalone, local Android HTTP SMS gateway into a multi-project, centralized OTP generation and delivery infrastructure.
 
 In the original implementation, external applications had to reach the Android device directly via LAN IP (`192.168.x.x`) or ephemeral reverse tunnels (e.g., Cloudflare Quick Tunnel `trycloudflare.com`). This created severe operational pain points:
 - **Same Wi-Fi dependency** or reliance on temporary tunnels.
@@ -132,7 +132,7 @@ The new architecture decouples client applications from the physical Android dev
 
 ## 4. Architectural Comparison: Legacy vs. Global
 
-| Feature | Legacy Local Gateway | Global OTP Platform |
+| Feature | Legacy Local Gateway | Swift |
 | :--- | :--- | :--- |
 | **Network Direction** | Inbound HTTP to phone (Port 8080) | Outbound HTTPS polling from phone to cloud |
 | **Network Dependency** | Same Wi-Fi or Cloudflare Tunnel | Any internet connection (Wi-Fi or Mobile Data) |

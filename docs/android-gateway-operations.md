@@ -113,7 +113,7 @@ For long-term, continuous 24/7 unattended production operation on Android 15:
 ## 5. Daily Operations & Troubleshooting Runbook
 
 ### Starting the Worker
-1. Launch the **SMS Gateway** app on the Android phone.
+1. Launch the **Swift** app on the Android phone.
 2. Verify Gateway Settings:
    - **Mode:** `GLOBAL_WORKER`
    - **Backend URL:** `https://global-otp-service.vercel.app`

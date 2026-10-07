@@ -1,9 +1,15 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
-    <style name="Base.Theme.Sms" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    <style name="Base.Theme.Swift" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#171717</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#171717</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#EDEDED</item>
+        <item name="colorOnPrimaryContainer">#171717</item>
+        <item name="colorSecondaryContainer">#EDEDED</item>
+        <item name="colorOnSecondaryContainer">#171717</item>
     </style>
 
-    <style name="Theme.Sms" parent="Base.Theme.Sms" />
+    <style name="Theme.Swift" parent="Base.Theme.Swift" />
 </resources>

@@ -13,12 +13,20 @@
         android:orientation="vertical"
         android:padding="16dp">
 
+        <ImageView
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_gravity="center_horizontal"
+            android:src="@drawable/swift_logo"
+            android:contentDescription="@string/swift_logo_description"
+            android:layout_marginBottom="8dp" />
+
         <!-- Title -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Global OTP Gateway"
-            android:textSize="22sp"
+            android:text="@string/app_name"
+            android:textSize="28sp"
             android:textStyle="bold"
             android:gravity="center"
             android:layout_marginBottom="12dp" />
@@ -333,6 +341,6 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:src="@android:drawable/ic_dialog_email"
-        app:tint="@android:color/white" />
+        app:tint="?attr/colorOnSecondaryContainer" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

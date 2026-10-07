@@ -63,11 +63,11 @@ class SmsGatewayService : Service() {
         globalWorker = GlobalGatewayWorker(this, configManager, serviceScope)
         
         createNotificationChannel()
-        Log.d(TAG, "SMS Gateway Service created (Mode: ${configManager.gatewayMode})")
+        Log.d(TAG, "Swift Service created (Mode: ${configManager.gatewayMode})")
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "SMS Gateway Service starting in mode: ${configManager.gatewayMode}")
+        Log.d(TAG, "Swift Service starting in mode: ${configManager.gatewayMode}")
         
         startForeground(NOTIFICATION_ID, createNotification("Initializing Gateway Service..."))
         
@@ -126,7 +126,7 @@ class SmsGatewayService : Service() {
         stopApiServer()
         globalWorker?.stop()
         serviceScope.cancel()
-        Log.d(TAG, "SMS Gateway Service destroyed")
+        Log.d(TAG, "Swift Service destroyed")
     }
     
     override fun onBind(intent: Intent?): IBinder = binder
@@ -173,7 +173,7 @@ class SmsGatewayService : Service() {
             val port = configManager.serverPort
             val interfaces = NetworkInterface.getNetworkInterfaces()
             
-            Log.i(TAG, "SMS Gateway API Server URLs:")
+            Log.i(TAG, "Swift API Server URLs:")
             Log.i(TAG, "- Local: http://localhost:$port/api/info")
             Log.i(TAG, "- Local: http://127.0.0.1:$port/api/info")
             
@@ -228,10 +228,10 @@ class SmsGatewayService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SMS Gateway Service",
+                "Swift Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "SMS Gateway Worker notifications"
+                description = "Swift Worker notifications"
                 setShowBadge(false)
             }
             
@@ -240,7 +240,7 @@ class SmsGatewayService : Service() {
         }
     }
     
-    private fun createNotification(message: String = "SMS Gateway Service running"): Notification {
+    private fun createNotification(message: String = "Swift Service running"): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
@@ -248,7 +248,7 @@ class SmsGatewayService : Service() {
         )
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SMS Gateway")
+            .setContentTitle("Swift")
             .setContentText(message)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)

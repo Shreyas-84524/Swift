@@ -1,6 +1,6 @@
 # Database Migrations & Schemas
 
-This directory holds the relational database schemas and migration scripts for the **Global OTP Platform**.
+This directory holds the relational database schemas and migration scripts for the **Swift**.
 
 ## Files
 - `schema.sql`: Complete DDL schema script for PostgreSQL (compatible with Supabase, Neon, or standard PostgreSQL 14+).

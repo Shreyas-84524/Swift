@@ -1,4 +1,4 @@
-# Global OTP Platform — Security & Authentication Model
+# Swift — Security & Authentication Model
 
 ## 1. Security Architecture Principles
 

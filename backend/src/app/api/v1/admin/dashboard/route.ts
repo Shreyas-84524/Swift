@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      admin: { display_name: admin.display_name, phone_number: admin.phone_number },
+      admin: { display_name: admin.display_name, email: admin.email },
       projects: projects.map((project) => ({
         ...project,
         keys: Object.fromEntries(projectKeys)[project.id] ?? [],

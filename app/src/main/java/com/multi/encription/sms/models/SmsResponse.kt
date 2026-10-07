@@ -77,7 +77,7 @@ data class SmsStatusResponse(
 
 data class ApiInfoResponse(
     @SerializedName("app_name")
-    val appName: String = "SMS Gateway",
+    val appName: String = "Swift",
     
     @SerializedName("version")
     val version: String = "1.0.0",

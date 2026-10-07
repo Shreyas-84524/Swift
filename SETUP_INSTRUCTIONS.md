@@ -1,4 +1,4 @@
-# SMS Gateway Setup Instructions
+# Swift Setup Instructions
 
 ## Prerequisites
 
@@ -48,7 +48,7 @@ When you first open the app, you'll be prompted to grant the following permissio
 
 ### 2. Configure API Server
 
-1. Open the SMS Gateway app
+1. Open the Swift app
 2. The app will automatically generate an API key
 3. Configure the server port (default: 8080)
 4. Enable the API server by toggling the switch
@@ -129,7 +129,7 @@ curl -X POST http://192.168.1.100:8080/api/send \
 
 #### 1. App Crashes on Startup
 - **Cause**: Missing permissions
-- **Solution**: Manually grant SMS permissions in Android Settings > Apps > SMS Gateway > Permissions
+- **Solution**: Manually grant SMS permissions in Android Settings > Apps > Swift > Permissions
 
 #### 2. API Server Won't Start
 - **Cause**: Port already in use
