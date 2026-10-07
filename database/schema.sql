@@ -56,14 +56,7 @@ CREATE TABLE IF NOT EXISTS gateway_api_keys (
     revoked_at TIMESTAMPTZ NULL
 );
 
--- 5. Browser login uses a single server-configured owner.
--- Store only the login-attempt audit/rate-limit records in PostgreSQL.
-CREATE TABLE IF NOT EXISTS admin_login_attempts (
-    id BIGSERIAL PRIMARY KEY,
-    identity_hash VARCHAR(64) NOT NULL,
-    succeeded BOOLEAN NOT NULL DEFAULT FALSE,
-    attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- 5. Browser login and authentication audit records are managed by Supabase Auth.
 
 -- 6. OTP Challenges Table
 CREATE TABLE IF NOT EXISTS otp_challenges (
@@ -108,5 +101,12 @@ CREATE INDEX IF NOT EXISTS idx_gateway_api_keys_hash ON gateway_api_keys (key_ha
 CREATE INDEX IF NOT EXISTS idx_otp_challenges_verify ON otp_challenges (id, consumed, expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_otp_challenges_idempotency ON otp_challenges (project_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_sms_jobs_phone ON sms_jobs (phone_number, created_at);
-CREATE INDEX IF NOT EXISTS idx_admin_login_attempts_recent ON admin_login_attempts (identity_hash, attempted_at DESC);
+-- The Data API must not expose queue, OTP, or API-key records.
+-- Swift connects from its server using DATABASE_URL with a privileged role.
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gateways ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gateway_api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE otp_challenges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sms_jobs ENABLE ROW LEVEL SECURITY;
 

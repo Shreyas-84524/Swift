@@ -49,7 +49,7 @@ Open http://localhost:3000/admin and sign in with the configured owner email and
 
 ## Deploy the backend
 
-Deploy `backend/` as the Next.js project on Vercel. Configure these **server-only** variables for the target environment:
+Connect this repository to Vercel and set its Root Directory to `backend`. For CLI deployments to that configured project, run `vercel deploy --prod` from the repository root; `.vercelignore` excludes Android files and local secrets. Configure these **server-only** variables for the target environment:
 
 | Variable | Purpose |
 | --- | --- |

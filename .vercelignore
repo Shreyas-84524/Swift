@@ -1,0 +1,14 @@
+/.git
+/.gradle
+/.idea
+/.codex
+/app
+/build
+/gradle
+/images
+/local.properties
+backend/.env*
+backend/node_modules
+backend/.next
+backend/tsconfig.tsbuildinfo
+backend/.swift-preview.cjs
