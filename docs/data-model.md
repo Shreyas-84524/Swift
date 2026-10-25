@@ -6,9 +6,13 @@
 erDiagram
     PROJECTS ||--o{ PROJECT_API_KEYS : has
     PROJECTS ||--o{ OTP_CHALLENGES : creates
+    PROJECTS ||--o{ MESSAGE_TEMPLATES : owns
+    MESSAGE_TEMPLATES ||--o{ MESSAGE_TEMPLATE_VERSIONS : has
     OTP_CHALLENGES ||--o{ SMS_JOBS : triggers
     GATEWAYS ||--o{ GATEWAY_API_KEYS : has
+    GATEWAYS ||--o{ GATEWAY_PUSH_TOKENS : registers
     GATEWAYS ||--o{ SMS_JOBS : processes
+    SMS_JOBS ||--o{ NOTIFICATION_OUTBOX : triggers
 
     PROJECTS {
         uuid id PK
@@ -18,6 +22,73 @@ erDiagram
         jsonb config
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    MESSAGE_TEMPLATES {
+        uuid id PK
+        uuid project_id FK
+        varchar name
+        varchar slug
+        varchar template_type
+        text description
+        varchar status
+        uuid active_version_id FK
+        varchar dlt_template_id
+        varchar sender_header
+        varchar pe_id
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    MESSAGE_TEMPLATE_VERSIONS {
+        uuid id PK
+        uuid template_id FK
+        integer version_number
+        text body
+        jsonb variables
+        integer character_count
+        integer segment_count
+        varchar encoding
+        varchar status
+        varchar dlt_template_id
+        varchar sender_header
+        varchar pe_id
+        varchar created_by
+        varchar approved_by
+        timestamptz approved_at
+        timestamptz created_at
+        timestamptz activated_at
+    }
+
+    GATEWAY_PUSH_TOKENS {
+        uuid id PK
+        uuid gateway_id FK
+        text token
+        varchar provider
+        varchar platform
+        varchar device_fingerprint
+        boolean is_valid
+        timestamptz last_registered_at
+        timestamptz last_used_at
+        timestamptz created_at
+    }
+
+    NOTIFICATION_OUTBOX {
+        uuid id PK
+        uuid gateway_id FK
+        uuid job_id FK
+        varchar channel
+        varchar priority
+        jsonb payload
+        varchar status
+        integer attempts
+        integer max_attempts
+        timestamptz last_attempt_at
+        timestamptz next_attempt_at
+        varchar response_code
+        text error_message
+        timestamptz created_at
+        timestamptz sent_at
     }
 
     PROJECT_API_KEYS {
@@ -182,6 +253,73 @@ API credentials issued specifically to physical Android Gateway devices.
 - `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
 - `revoked_at` (TIMESTAMPTZ, NULLABLE).
 
+### 2.7 `message_templates`
+Message templates per project supporting lifecycle states (`DRAFT`, `APPROVED`, `ACTIVE`, `ARCHIVED`).
+- `id` (UUID, Primary Key).
+- `project_id` (UUID, FK -> `projects.id`, ON DELETE CASCADE).
+- `name` (VARCHAR(100), NOT NULL).
+- `slug` (VARCHAR(100), NOT NULL, UNIQUE per project).
+- `template_type` (VARCHAR(30), DEFAULT 'OTP'): `OTP`, `TRANSACTIONAL`, `MARKETING`, `NOTIFICATION`.
+- `description` (TEXT, NULLABLE).
+- `status` (VARCHAR(20), DEFAULT 'DRAFT'): `DRAFT`, `APPROVED`, `ACTIVE`, `ARCHIVED`.
+- `active_version_id` (UUID, NULLABLE, FK -> `message_template_versions.id`).
+- `dlt_template_id` (VARCHAR(50), NULLABLE): Indian telecom DLT template ID.
+- `sender_header` (VARCHAR(15), NULLABLE): Telecom sender header (e.g., `SWIFTG`).
+- `pe_id` (VARCHAR(50), NULLABLE): Principal Entity ID for regulatory compliance.
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `updated_at` (TIMESTAMPTZ, DEFAULT NOW()).
+
+### 2.8 `message_template_versions`
+Immutable version history for message templates.
+- `id` (UUID, Primary Key).
+- `template_id` (UUID, FK -> `message_templates.id`, ON DELETE CASCADE).
+- `version_number` (INTEGER, NOT NULL): Incremental sequence (1, 2, 3...).
+- `body` (TEXT, NOT NULL): Template text with approved placeholders (`{{otp}}`, `{{app_name}}`, `{{expiry_minutes}}`).
+- `variables` (JSONB, NOT NULL): Extracted placeholders array.
+- `character_count` (INTEGER, NOT NULL): Calculated telecom character count.
+- `segment_count` (INTEGER, NOT NULL): Estimated SMS parts.
+- `encoding` (VARCHAR(10), NOT NULL): `GSM_7` or `UCS2`.
+- `status` (VARCHAR(20), DEFAULT 'DRAFT'): `DRAFT`, `APPROVED`, `ACTIVE`, `ARCHIVED`.
+- `dlt_template_id` (VARCHAR(50), NULLABLE).
+- `sender_header` (VARCHAR(15), NULLABLE).
+- `pe_id` (VARCHAR(50), NULLABLE).
+- `created_by` (VARCHAR(100), NULLABLE).
+- `approved_by` (VARCHAR(100), NULLABLE).
+- `approved_at` (TIMESTAMPTZ, NULLABLE).
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `activated_at` (TIMESTAMPTZ, NULLABLE).
+
+### 2.9 `gateway_push_tokens`
+Stores push notification tokens (FCM, HMS, APNS) for Android gateway devices to enable event-driven push wakeup.
+- `id` (UUID, Primary Key).
+- `gateway_id` (UUID, FK -> `gateways.id`, ON DELETE CASCADE).
+- `token` (TEXT, NOT NULL): Cloud messaging device token.
+- `provider` (VARCHAR(20), DEFAULT 'FCM'): `FCM`, `HMS`, `APNS`.
+- `platform` (VARCHAR(20), DEFAULT 'ANDROID'): `ANDROID`, `IOS`, `WEB`.
+- `device_fingerprint` (VARCHAR(128), NULLABLE).
+- `is_valid` (BOOLEAN, DEFAULT TRUE).
+- `last_registered_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `last_used_at` (TIMESTAMPTZ, NULLABLE).
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
+
+### 2.10 `notification_outbox`
+Guaranteed transactional delivery queue for outbound push notifications to gateway devices.
+- `id` (UUID, Primary Key).
+- `gateway_id` (UUID, FK -> `gateways.id`, ON DELETE SET NULL).
+- `job_id` (UUID, FK -> `sms_jobs.id`, ON DELETE CASCADE).
+- `channel` (VARCHAR(20), DEFAULT 'FCM'): `FCM`, `WEBHOOK`, `SYSTEM`.
+- `priority` (VARCHAR(10), DEFAULT 'HIGH'): `HIGH`, `NORMAL`.
+- `payload` (JSONB, NOT NULL): Message envelope (action, job_id, etc.).
+- `status` (VARCHAR(20), DEFAULT 'PENDING'): `PENDING`, `PROCESSING`, `SENT`, `FAILED`, `DEAD_LETTER`.
+- `attempts` (INTEGER, DEFAULT 0).
+- `max_attempts` (INTEGER, DEFAULT 5).
+- `last_attempt_at` (TIMESTAMPTZ, NULLABLE).
+- `next_attempt_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `response_code` (VARCHAR(50), NULLABLE).
+- `error_message` (TEXT, NULLABLE).
+- `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `sent_at` (TIMESTAMPTZ, NULLABLE).
+
 ---
 
 ## 3. High-Performance Indexing Strategy
@@ -203,3 +341,46 @@ API credentials issued specifically to physical Android Gateway devices.
    ```sql
    CREATE INDEX idx_otp_challenges_verify ON otp_challenges (id, consumed, expires_at);
    ```
+5. **Single Active OTP Template per Project Partial Unique Index:**
+   ```sql
+   CREATE UNIQUE INDEX idx_one_active_otp_template_per_project ON message_templates (project_id)
+   WHERE template_type = 'OTP' AND status = 'ACTIVE';
+   ```
+6. **Single Active Version per Template Partial Unique Index:**
+   ```sql
+   CREATE UNIQUE INDEX idx_one_active_version_per_template ON message_template_versions (template_id)
+   WHERE status = 'ACTIVE';
+   ```
+7. **Push Notification Outbox Dispatch Index:**
+   ```sql
+   CREATE INDEX idx_notification_outbox_pending ON notification_outbox (status, next_attempt_at)
+   WHERE status IN ('PENDING', 'PROCESSING');
+   ```
+
+---
+
+## 4. Phase 1 Corrections & Relational Invariants (Migration 005)
+
+To guarantee zero cross-template version corruption and enforce bidirectional state consistency:
+
+1. **Composite Foreign Key Ownership Invariant:**
+   ```sql
+   ALTER TABLE message_templates
+   ADD CONSTRAINT fk_template_active_version
+   FOREIGN KEY (id, active_version_id)
+   REFERENCES message_template_versions (template_id, id)
+   DEFERRABLE INITIALLY DEFERRED;
+   ```
+   Ensures `active_version_id` can **never** reference a version belonging to another template.
+
+2. **Template-Version Status Invariant Triggers:**
+   - `trg_enforce_template_active_version`: Deferred constraint trigger on `message_templates` enforcing that:
+     - If `active_version_id IS NULL`, status must NOT be `ACTIVE`.
+     - If `active_version_id IS NOT NULL`, template status MUST be `ACTIVE` (strictly rejects `DRAFT`, `APPROVED`, or `ARCHIVED` templates with non-null pointer), and the referenced version must belong to the template with status `ACTIVE`.
+   - `trg_enforce_version_active_invariant`: Deferred constraint trigger on `message_template_versions` enforcing that when a version is set to `ACTIVE`, its parent template must exist, be `ACTIVE`, and point to it via `active_version_id`. Also prevents demoting an active version while the parent is still `ACTIVE` and pointing to it.
+   - `trg_before_template_archive_clear_pointer`: `BEFORE UPDATE` trigger on `message_templates` setting `NEW.active_version_id := NULL` when transitioning to `ARCHIVED`.
+   - `trg_cascade_template_archive`: `AFTER UPDATE` trigger on `message_templates` cascading `status = 'ARCHIVED'` to all non-archived versions.
+
+3. **Pre-flight Sanitization & Audit Columns:**
+   - Pre-flight cleanup in Migration 005 ensures every `ACTIVE` version that is not the deployed version of an `ACTIVE` parent template is demoted to `APPROVED`.
+   - `message_template_versions` records `approved_by (VARCHAR(100))` and `approved_at (TIMESTAMPTZ)` populated on explicit owner approval, alongside `activated_at (TIMESTAMPTZ)`.
