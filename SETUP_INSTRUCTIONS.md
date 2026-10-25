@@ -295,3 +295,15 @@ To enable live FCM push wake-up on Android devices (Phase 3):
      JobDrainEngine: Draining queue triggered by FCM_PUSH
      GlobalGatewayWorker: SMS job claimed and dispatched successfully
      ```
+
+### Phase 4 Outbox Retry Scheduler
+
+Immediate FCM delivery is attempted when an OTP is queued. To retry failed wakes and reclaim interrupted outbox leases, configure a trusted scheduler that can make an authenticated `POST` request:
+
+1. Generate a high-entropy secret (at least 32 random bytes) and configure it only in the backend and scheduler environments:
+   ```bash
+   OUTBOX_SCHEDULER_SECRET=replace-with-a-long-random-secret
+   ```
+2. Invoke `POST /api/v1/internal/outbox/dispatch` with `Authorization: Bearer <OUTBOX_SCHEDULER_SECRET>` and an optional JSON body such as `{ "batch_size": 25, "max_time_ms": 10000 }`.
+3. Never place the scheduler secret in a URL or client application. The endpoint rejects query-string credentials.
+4. No scheduler is installed automatically by this repository. Until a trusted scheduler is configured, immediate FCM delivery and Android's 15-minute WorkManager reconciliation remain available, but server-side outbox retries will not run automatically.

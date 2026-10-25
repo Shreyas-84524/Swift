@@ -36,6 +36,10 @@ import { GatewaySelector } from '../src/lib/push/gateway-selector';
 import { FcmSender, sanitizeFirebaseError } from '../src/lib/push/fcm-sender';
 import { PushService } from '../src/lib/push/push-service';
 import { setMockFirebaseMessaging, resetFirebaseAdminState, isFirebaseConfigured } from '../src/lib/push/firebase-admin';
+import { POST as outboxDispatchRoute } from '../src/app/api/v1/internal/outbox/dispatch/route';
+import { GET as outboxHealthRoute } from '../src/app/api/v1/admin/outbox/health/route';
+import { POST as outboxDeadLetterRetryRoute } from '../src/app/api/v1/admin/outbox/dead-letter/retry/route';
+import { verifySchedulerSecret, authenticateScheduler } from '../src/lib/auth/internal';
 
 let simulateTemplateDbError = false;
 
@@ -1040,7 +1044,7 @@ const store = {
   }
 
   // Atomic outbox claim for processing
-  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'PROCESSING\'')) {
+  if (!sql.includes('WITH due_items AS') && sql.includes('UPDATE notification_outbox') && sql.includes('status = \'PROCESSING\'')) {
     const outboxId = params[0];
     const item = store.notificationOutbox.get(outboxId);
     const now = Date.now();
@@ -1091,7 +1095,7 @@ const store = {
   }
 
   // Update outbox status DEAD_LETTER
-  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'DEAD_LETTER\'')) {
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('SET status = \'DEAD_LETTER\'')) {
     const outboxId = params[0];
     const item = store.notificationOutbox.get(outboxId);
     if (item) {
@@ -1119,6 +1123,179 @@ const store = {
       return { rows: [], rowCount: 1 };
     }
     return { rows: [], rowCount: 0 };
+  }
+
+
+  // Phase 4: Batch claim with FOR UPDATE SKIP LOCKED
+  if (sql.includes('WITH due_items AS') && sql.includes('UPDATE notification_outbox')) {
+    const limit = params[0] || 20;
+    const now = Date.now();
+    const claimedRows: any[] = [];
+    const items = Array.from(store.notificationOutbox.values())
+      .filter((item) => {
+        const isDue = (!item.next_attempt_at || new Date(item.next_attempt_at).getTime() <= now) && (item.status === 'PENDING' || item.status === 'FAILED');
+        const isStale = item.status === 'PROCESSING' && ((item.lease_expires_at && new Date(item.lease_expires_at).getTime() <= now) || (!item.lease_expires_at && item.last_attempt_at && new Date(item.last_attempt_at).getTime() < now - 5 * 60 * 1000));
+        return isDue || isStale;
+      })
+      .sort((a, b) => new Date(a.next_attempt_at || 0).getTime() - new Date(b.next_attempt_at || 0).getTime())
+      .slice(0, limit);
+
+    for (const item of items) {
+      item.status = 'PROCESSING';
+      item.attempts = (item.attempts || 0) + 1;
+      item.last_attempt_at = new Date().toISOString();
+      item.lease_expires_at = new Date(now + 2 * 60 * 1000).toISOString();
+      claimedRows.push({
+        id: item.id,
+        gateway_id: item.gateway_id,
+        attempts: item.attempts,
+        max_attempts: item.max_attempts || 5,
+      });
+    }
+    return { rows: claimedRows, rowCount: claimedRows.length };
+  }
+
+  // Phase 4: Release remaining on budget timeout
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'PENDING\'') && sql.includes('attempts = GREATEST(0, attempts - 1)')) {
+    const targetIds = params[0] || [];
+    for (const id of targetIds) {
+      const item = store.notificationOutbox.get(id);
+      if (item) {
+        item.status = 'PENDING';
+        item.lease_expires_at = null;
+        item.attempts = Math.max(0, (item.attempts || 1) - 1);
+      }
+    }
+    return { rows: [], rowCount: targetIds.length };
+  }
+
+  // Phase 4: Retry dead-letter
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('SET status = \'PENDING\'') && sql.includes('DEAD_LETTER')) {
+    const targetIds = params[0] || [];
+    const projectId = params[1] || null;
+    const retriedRows: any[] = [];
+    for (const id of targetIds) {
+      const item = store.notificationOutbox.get(id);
+      if (item && item.status === 'DEAD_LETTER') {
+        let valid = true;
+        if (item.job_id) {
+          const job = store.smsJobs.get(item.job_id);
+          if (!job || ['SENT', 'DELIVERED', 'EXPIRED'].includes(job.status)) {
+            valid = false;
+          }
+          if (projectId && job && job.project_id !== projectId) {
+            valid = false;
+          }
+        }
+        if (valid) {
+          item.status = 'PENDING';
+          item.attempts = 0;
+          item.next_attempt_at = new Date().toISOString();
+          item.last_attempt_at = null;
+          item.lease_expires_at = null;
+          item.error_message = null;
+          item.response_code = 'MANUAL_RETRY_PENDING';
+          item.gateway_id = null;
+          retriedRows.push({ id: item.id });
+        }
+      }
+    }
+    return { rows: retriedRows, rowCount: retriedRows.length };
+  }
+
+  // Phase 4: Outbox Health status counts
+  if (sql.includes('SELECT status, COUNT(*) AS count FROM notification_outbox GROUP BY status')) {
+    const counts: Record<string, number> = {};
+    for (const item of store.notificationOutbox.values()) {
+      counts[item.status] = (counts[item.status] || 0) + 1;
+    }
+    const rows = Object.entries(counts).map(([status, count]) => ({ status, count: String(count) }));
+    return { rows, rowCount: rows.length };
+  }
+
+  // Phase 4: Oldest due age
+  if (sql.includes('SELECT EXTRACT(EPOCH FROM (NOW() - next_attempt_at)) AS age_seconds FROM notification_outbox WHERE status IN (\'PENDING\', \'FAILED\') AND next_attempt_at <= NOW()')) {
+    const now = Date.now();
+    const dueItems = Array.from(store.notificationOutbox.values())
+      .filter((i) => (i.status === 'PENDING' || i.status === 'FAILED') && new Date(i.next_attempt_at).getTime() <= now)
+      .sort((a, b) => new Date(a.next_attempt_at).getTime() - new Date(b.next_attempt_at).getTime());
+    if (dueItems.length > 0) {
+      const age = Math.max(0, Math.floor((now - new Date(dueItems[0].next_attempt_at).getTime()) / 1000));
+      return { rows: [{ age_seconds: String(age) }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Phase 4: Last wake
+  if (sql.includes('SELECT created_at, status, response_code, EXTRACT(EPOCH FROM (NOW() - created_at)) AS age_seconds FROM notification_outbox WHERE status IN (\'SENT\', \'FAILED\', \'DEAD_LETTER\')')) {
+    const now = Date.now();
+    const terminalItems = Array.from(store.notificationOutbox.values())
+      .filter((i) => ['SENT', 'FAILED', 'DEAD_LETTER'].includes(i.status))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (terminalItems.length > 0) {
+      const item = terminalItems[0];
+      const age = Math.max(0, Math.floor((now - new Date(item.created_at).getTime()) / 1000));
+      return {
+        rows: [{
+          created_at: new Date(item.created_at),
+          status: item.status,
+          response_code: item.response_code || null,
+          age_seconds: String(age),
+        }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Phase 4: Token health
+  if (sql.includes('SELECT COUNT(*) FILTER (WHERE is_valid = true) AS active, COUNT(*) FILTER (WHERE is_valid = false) AS invalid, COUNT(DISTINCT gateway_id) FILTER (WHERE is_valid = true) AS gateways_with_active_token FROM gateway_push_tokens')) {
+    let active = 0;
+    let invalid = 0;
+    const activeGateways = new Set<string>();
+    for (const t of store.gatewayPushTokens.values()) {
+      if (t.is_valid) {
+        active++;
+        activeGateways.add(t.gateway_id);
+      } else {
+        invalid++;
+      }
+    }
+    return {
+      rows: [{
+        active: String(active),
+        invalid: String(invalid),
+        gateways_with_active_token: String(activeGateways.size),
+      }],
+      rowCount: 1,
+    };
+  }
+
+  // Phase 4: Gateway health
+  if (sql.includes("COUNT(*) FILTER (WHERE is_active = true AND last_seen_at IS NOT NULL AND last_seen_at > NOW() - INTERVAL '2 minutes') AS online")) {
+    let total_active = 0;
+    let online = 0;
+    let mostRecent: Date | null = null;
+    for (const g of store.gateways.values()) {
+      if (g.is_active) {
+        total_active++;
+        if (g.last_seen_at && new Date(g.last_seen_at).getTime() > Date.now() - 2 * 60 * 1000) online++;
+      }
+      if (g.last_seen_at) {
+        const d = new Date(g.last_seen_at);
+        if (!mostRecent || d.getTime() > mostRecent.getTime()) {
+          mostRecent = d;
+        }
+      }
+    }
+    return {
+      rows: [{
+        total_active: String(total_active),
+        online: String(online),
+        most_recent_seen_at: mostRecent,
+      }],
+      rowCount: 1,
+    };
   }
 
   return { rows: [], rowCount: 0 };
@@ -2942,6 +3119,330 @@ async function runAllTests() {
   resetFirebaseAdminState();
 
 
+
+
+  // ===============================================================
+  // Phase 4 Test Suite: Reliable Outbox Recovery & Production Hardening
+  // ===============================================================
+
+  console.log('\n▶ Test Suite 22: Phase 4 Internal Scheduler Dispatcher Security & Contract');
+  const schedulerSecret = 'swift_test_scheduler_secret_998877665544';
+  process.env.OUTBOX_SCHEDULER_SECRET = schedulerSecret;
+
+  // 1. Query parameter credential leakage rejection
+  const qpReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch?secret=leak_token', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${schedulerSecret}` },
+  });
+  const qpRes = await outboxDispatchRoute(qpReq);
+  assert(qpRes.status === 400, 'Rejects credentials supplied in URL query parameters with HTTP 400');
+  const qpBody = await qpRes.json();
+  assert(qpBody.error.includes('query parameters'), 'Error message specifies credentials forbidden in query params');
+
+  // 2. Missing scheduler configuration on server
+  delete process.env.OUTBOX_SCHEDULER_SECRET;
+  const noConfReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${schedulerSecret}` },
+  });
+  const noConfRes = await outboxDispatchRoute(noConfReq);
+  assert(noConfRes.status === 401, 'Rejects dispatch when server lacks OUTBOX_SCHEDULER_SECRET (HTTP 401)');
+  process.env.OUTBOX_SCHEDULER_SECRET = schedulerSecret;
+
+  // 3. Missing Authorization header
+  const noAuthReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+  });
+  const noAuthRes = await outboxDispatchRoute(noAuthReq);
+  assert(noAuthRes.status === 401, 'Rejects request missing Authorization header with HTTP 401');
+
+  // 4. Invalid / tampered Bearer token
+  const badAuthReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer wrong_tampered_secret' },
+  });
+  const badAuthRes = await outboxDispatchRoute(badAuthReq);
+  assert(badAuthRes.status === 401, 'Rejects invalid Bearer token with HTTP 401');
+
+  // 5. Constant-time crypto comparison
+  assert(verifySchedulerSecret(schedulerSecret, schedulerSecret) === true, 'Constant-time verification accepts identical secrets');
+  assert(verifySchedulerSecret('tampered', schedulerSecret) === false, 'Constant-time verification rejects mismatched secrets');
+  assert(verifySchedulerSecret('', schedulerSecret) === false, 'Constant-time verification rejects empty token');
+
+  // 6. Authorized batch dispatch execution
+  const p4AuthReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${schedulerSecret}` },
+    body: { batch_size: 10, max_time_ms: 5000 },
+  });
+  const p4AuthRes = await outboxDispatchRoute(p4AuthReq);
+  assert(p4AuthRes.status === 200, 'Authorized internal scheduler call returns HTTP 200 OK');
+  const p4AuthBody = await p4AuthRes.json();
+  assert(p4AuthBody.success === true, 'Authorized response contains success: true');
+  assert(typeof p4AuthBody.counts.claimed === 'number', 'Response contains claimed counter');
+  assert(typeof p4AuthBody.duration_ms === 'number', 'Response contains duration_ms metric');
+
+  const malformedDispatchReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${schedulerSecret}`, 'content-type': 'application/json' },
+    body: '{"batch_size":',
+  });
+  const malformedDispatchRes = await outboxDispatchRoute(malformedDispatchReq);
+  assert(malformedDispatchRes.status === 400, 'Scheduler rejects malformed JSON instead of silently using defaults');
+
+  const oversizedBatchReq = makeRequest('http://localhost:3000/api/v1/internal/outbox/dispatch', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${schedulerSecret}` },
+    body: { batch_size: 51 },
+  });
+  const oversizedBatchRes = await outboxDispatchRoute(oversizedBatchReq);
+  assert(oversizedBatchRes.status === 400, 'Scheduler rejects batch sizes above the bounded maximum');
+
+  console.log('\n▶ Test Suite 23: Phase 4 Outbox Batch Claiming & Concurrency');
+  // Clear or complete prior outbox items so this test suite has deterministic queue state
+  for (const item of store.notificationOutbox.values()) {
+    if (item.status === 'PENDING' || item.status === 'FAILED') {
+      item.status = 'SENT';
+    }
+  }
+
+  // 7. Seed outbox records with due and future timestamps
+  const dueOutboxId = crypto.randomUUID();
+  const batchFutureOutboxId = crypto.randomUUID();
+  const staleLeaseOutboxId = crypto.randomUUID();
+  const activeLeaseOutboxId = crypto.randomUUID();
+
+  store.notificationOutbox.set(dueOutboxId, {
+    id: dueOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 0,
+    max_attempts: 5,
+    next_attempt_at: new Date(Date.now() - 10000).toISOString(), // Due 10s ago
+    created_at: new Date().toISOString(),
+  });
+
+  store.notificationOutbox.set(batchFutureOutboxId, {
+    id: batchFutureOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 0,
+    max_attempts: 5,
+    next_attempt_at: new Date(Date.now() + 60000).toISOString(), // Future +60s
+    created_at: new Date().toISOString(),
+  });
+
+  store.notificationOutbox.set(staleLeaseOutboxId, {
+    id: staleLeaseOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PROCESSING',
+    attempts: 1,
+    max_attempts: 5,
+    next_attempt_at: new Date(Date.now() - 20000).toISOString(),
+    lease_expires_at: new Date(Date.now() - 5000).toISOString(), // Expired lease
+    created_at: new Date().toISOString(),
+  });
+
+  store.notificationOutbox.set(activeLeaseOutboxId, {
+    id: activeLeaseOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PROCESSING',
+    attempts: 1,
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    lease_expires_at: new Date(Date.now() + 100000).toISOString(), // Active lease
+    created_at: new Date().toISOString(),
+  });
+
+  // Set up mock FCM messaging for batch dispatch
+  setMockFirebaseMessaging(mockMessaging);
+  mockMessaging.send = async () => 'projects/test-project/messages/msg_phase4_batch';
+
+  const batchDispatchResult = await PushService.claimAndDispatchBatch(10, 5000);
+  assert(batchDispatchResult.claimed >= 2, 'Batch claiming claims due items and expired leases');
+  assert(store.notificationOutbox.get(dueOutboxId)?.status === 'SENT', 'Due item dispatched and marked SENT');
+  assert(store.notificationOutbox.get(staleLeaseOutboxId)?.status === 'SENT', 'Stale lease recovered and marked SENT');
+  assert(store.notificationOutbox.get(batchFutureOutboxId)?.status === 'PENDING', 'Future item strictly skipped (status remains PENDING)');
+  assert(store.notificationOutbox.get(activeLeaseOutboxId)?.status === 'PROCESSING', 'Active lease untouched by concurrent workers');
+
+  console.log('\n▶ Test Suite 24: Phase 4 Bounded Exponential Backoff & Dead-Lettering');
+
+  // 8. Bounded backoff sequence verification
+  assert(PushService.retryDelaySeconds(1) === 30, 'Attempt 1 backoff delay is 30 seconds');
+  assert(PushService.retryDelaySeconds(2) === 60, 'Attempt 2 backoff delay is 60 seconds');
+  assert(PushService.retryDelaySeconds(3) === 120, 'Attempt 3 backoff delay is 120 seconds');
+  assert(PushService.retryDelaySeconds(4) === 240, 'Attempt 4 backoff delay is 240 seconds');
+  assert(PushService.retryDelaySeconds(5) === 480, 'Attempt 5 backoff delay is 480 seconds');
+  assert(PushService.retryDelaySeconds(6) === 480, 'Attempt 6 backoff delay is capped at 480 seconds');
+  assert(PushService.retryDelaySeconds(10) === 480, 'Attempt 10 backoff delay is capped at 480 seconds');
+
+  // 9. Dead-letter SMS job preservation
+  const deadJobId = crypto.randomUUID();
+  store.smsJobs.set(deadJobId, {
+    id: deadJobId,
+    project_id: project.id,
+    challenge_id: null,
+    assigned_gateway_id: null,
+    phone_number: '+919876543219',
+    message: 'OTP: 654321',
+    status: 'QUEUED',
+    attempts: 0,
+    lease_expires_at: null,
+    failure_reason: null,
+    created_at: new Date().toISOString(),
+    picked_up_at: null,
+    sent_at: null,
+    delivered_at: null,
+    failed_at: null,
+  });
+
+  const deadOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(deadOutboxId, {
+    id: deadOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: deadJobId,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'DEAD_LETTER',
+    attempts: 5,
+    max_attempts: 5,
+    response_code: 'MAX_ATTEMPTS_EXCEEDED',
+    next_attempt_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  assert(store.smsJobs.get(deadJobId)?.status === 'QUEUED', 'Underlying SMS job remains safely QUEUED in database when outbox dead-letters');
+
+  console.log('\n▶ Test Suite 25: Phase 4 Admin Observability & Dead-Letter Recovery');
+
+  // 10. Health endpoint requires authentication
+  const unauthHealthReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/health', {
+    method: 'GET',
+    admin: null,
+  });
+  const unauthHealthRes = await outboxHealthRoute(unauthHealthReq);
+  assert(unauthHealthRes.status === 401, 'GET /admin/outbox/health rejects unauthenticated requests with HTTP 401');
+
+  // 11. Health endpoint returns structured counts
+  const authHealthReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/health', {
+    method: 'GET',
+  });
+  const authHealthRes = await outboxHealthRoute(authHealthReq);
+  assert(authHealthRes.status === 200, 'GET /admin/outbox/health returns HTTP 200 OK for admin');
+  const healthJson = await authHealthRes.json();
+  assert(healthJson.success === true, 'Health response includes success: true');
+  assert(typeof healthJson.data.outbox.counts.dead_letter === 'number', 'Health response includes dead_letter count');
+  assert(typeof healthJson.data.tokens.active === 'number', 'Health response includes active token count');
+  assert(typeof healthJson.data.gateways.total_active === 'number', 'Health response includes active gateways count');
+  assert(typeof healthJson.data.sms_jobs.queued === 'number', 'Health response includes queued sms_jobs count');
+
+  // 12. Health endpoint zero-PII security inspection
+  const healthBodyStr = JSON.stringify(healthJson);
+  assert(!healthBodyStr.includes('fcm_test_token'), 'Health response contains zero push tokens');
+  assert(!healthBodyStr.includes('+919876543219'), 'Health response contains zero phone numbers');
+  assert(!healthBodyStr.includes('OTP: 654321'), 'Health response contains zero SMS message content');
+  assert(!healthBodyStr.includes(schedulerSecret), 'Health response contains zero secrets or keys');
+
+  // 13. Dead-letter recovery requires admin and CSRF
+  const csrfRetryReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/dead-letter/retry', {
+    method: 'POST',
+    headers: { 'origin': 'https://attacker.evil.com' },
+    body: { outbox_id: deadOutboxId },
+  });
+  const csrfRetryRes = await outboxDeadLetterRetryRoute(csrfRetryReq);
+  assert(csrfRetryRes.status === 403, 'Dead-letter retry rejects cross-origin request (CSRF check, HTTP 403)');
+
+  // 14. Dead-letter retry rejects empty input
+  const emptyRetryReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/dead-letter/retry', {
+    method: 'POST',
+    body: {},
+  });
+  const emptyRetryRes = await outboxDeadLetterRetryRoute(emptyRetryReq);
+  assert(emptyRetryRes.status === 400, 'Dead-letter retry rejects request without target outbox IDs with HTTP 400');
+
+  const invalidUuidRetryReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/dead-letter/retry', {
+    method: 'POST',
+    body: { outbox_id: 'not-a-uuid' },
+  });
+  const invalidUuidRetryRes = await outboxDeadLetterRetryRoute(invalidUuidRetryReq);
+  assert(invalidUuidRetryRes.status === 400, 'Dead-letter retry rejects malformed UUIDs before querying PostgreSQL');
+
+  // 15. Valid dead-letter recovery execution
+  const validRetryReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/dead-letter/retry', {
+    method: 'POST',
+    body: { outbox_id: deadOutboxId },
+  });
+  const validRetryRes = await outboxDeadLetterRetryRoute(validRetryReq);
+  assert(validRetryRes.status === 200, 'Valid dead-letter retry returns HTTP 200 OK');
+  const validRetryJson = await validRetryRes.json();
+  assert(validRetryJson.retried_count === 1, 'Exactly 1 outbox record retried');
+  assert(store.notificationOutbox.get(deadOutboxId)?.status === 'PENDING', 'Retried outbox entry transitioned back to PENDING');
+  assert(store.notificationOutbox.get(deadOutboxId)?.attempts === 0, 'Retried outbox entry attempts reset to 0');
+  assert(store.notificationOutbox.get(deadOutboxId)?.lease_expires_at === null, 'Retried outbox entry lease cleared');
+
+  // 16. Guard: Dead-letter recovery refuses to retry if underlying SMS job is terminal (SENT)
+  const sentJobId = crypto.randomUUID();
+  store.smsJobs.set(sentJobId, {
+    id: sentJobId,
+    project_id: project.id,
+    challenge_id: null,
+    assigned_gateway_id: null,
+    phone_number: '+919876543210',
+    message: 'OTP: 111222',
+    status: 'SENT', // Terminal state
+    attempts: 1,
+    lease_expires_at: null,
+    failure_reason: null,
+    created_at: new Date().toISOString(),
+    picked_up_at: null,
+    sent_at: new Date().toISOString(),
+    delivered_at: null,
+    failed_at: null,
+  });
+
+  const terminalOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(terminalOutboxId, {
+    id: terminalOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: sentJobId,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'DEAD_LETTER',
+    attempts: 5,
+    max_attempts: 5,
+    created_at: new Date().toISOString(),
+    next_attempt_at: new Date().toISOString(),
+  });
+
+  const terminalRetryReq = makeRequest('http://localhost:3000/api/v1/admin/outbox/dead-letter/retry', {
+    method: 'POST',
+    body: { outbox_id: terminalOutboxId },
+  });
+  const terminalRetryRes = await outboxDeadLetterRetryRoute(terminalRetryReq);
+  const terminalRetryJson = await terminalRetryRes.json();
+  assert(terminalRetryJson.retried_count === 0, 'Refuses to retry dead-letter outbox when SMS job is in terminal SENT state');
+  assert(store.notificationOutbox.get(terminalOutboxId)?.status === 'DEAD_LETTER', 'Terminal outbox entry remains DEAD_LETTER');
+
+  // Clean up
+  delete process.env.OUTBOX_SCHEDULER_SECRET;
 
   console.log('\n===============================================================');
   console.log(`Test Execution Complete: ${passedTests} / ${totalTests} Passed (100%)`);

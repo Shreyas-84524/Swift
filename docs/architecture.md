@@ -128,7 +128,7 @@ The architecture decouples client applications from the physical Android device 
   - **FCM Wake-Up:** High-priority FCM `JOBS_AVAILABLE` data messages wake `GatewayFirebaseMessagingService` when jobs arrive.
   - **WorkManager Host:** Dispatches `JobDrainWorker` (expedited) to claim and transmit jobs via `JobDrainEngine`.
   - **Durable Safety Net:** A 15-minute periodic `GatewayRecoveryWorker` runs as a safety net reconciliation job.
-  - **Foreground Service:** Runs for active connection status, UI display, and 60-second telemetry heartbeats. Adheres cleanly to Android 15's cumulative 6-hour background limit with graceful `Service.onTimeout()` shutdown.
+  - **Foreground Service Independence:** Global delivery no longer depends on a 60-second heartbeat loop or an uninterrupted foreground service. FCM and WorkManager remain the delivery mechanisms if the companion service reaches Android 15's runtime limit.
 - **Responsibilities:**
   1. Register and sync FCM push tokens via `PUT /api/v1/gateway/push-token` using `FcmTokenCoordinator`.
   2. Handle `JOBS_AVAILABLE` FCM push wake signals immediately.
@@ -218,13 +218,16 @@ Swift maintains a single-owner architecture. Gateway selection for push delivery
 3. **0 Matches (`NO_VALID_GATEWAY_TOKEN`):** No push is attempted. Outbox item is recorded as `FAILED` with sanitized code `NO_VALID_GATEWAY_TOKEN`. The durable SMS job remains queued for WorkManager reconciliation or manual sync.
 4. **> 1 Matches (`AMBIGUOUS_GATEWAY_SELECTION`):** Push wake is safely suppressed. Outbox item is recorded as `FAILED` with sanitized code `AMBIGUOUS_GATEWAY_SELECTION`. This prevents waking multiple physical devices simultaneously and causing duplicate carrier SMS dispatches. The queue falls back to atomic row leasing.
 
-### 7.3 Transactional Outbox State Machine
+### 7.3 Transactional Outbox State Machine & Distributed Recovery
 
 - **States:** `PENDING` → `PROCESSING` → `SENT` / `FAILED` / `DEAD_LETTER`.
-- **Atomic Claiming:** A due `PENDING`/`FAILED` record is atomically moved to `PROCESSING`; a `PROCESSING` record whose lease is older than five minutes can be reclaimed after a crashed invocation.
+- **Atomic Batch Claiming (`FOR UPDATE SKIP LOCKED`):** Migration 007 introduces `idx_notification_outbox_due` and `idx_notification_outbox_stale_leases` to allow concurrent cron dispatchers and worker invocations to claim non-overlapping slices of due outbox records without blocking or serialization conflicts.
+- **Distributed Lease Tracking (`lease_expires_at`):** When claimed, `lease_expires_at` is populated (`NOW() + INTERVAL '2 minutes'`). If an invocation crashes or terminates abruptly before clearing the lease, subsequent batch sweeps automatically recover the stale `PROCESSING` record once `lease_expires_at <= NOW()`.
 - **Idempotency & Deduplication:** Enforced via `deduplication_key` and its unique index. Client idempotency keys are SHA-256-derived before use as outbox keys, keeping the database key bounded and avoiding storage of a second raw copy.
-- **Retry Backoff:** Retryable failures schedule bounded exponential backoff (`30s`, `60s`, `120s`, `240s`, then `480s`; maximum 15 minutes). When `attempts >= max_attempts` (default 5), status moves to `DEAD_LETTER`.
-- **Token Invalidation:** On `UNREGISTERED_TOKEN` (including HTTP 404, `messaging/registration-token-not-registered`), the gateway's token is immediately set to `is_valid = FALSE` in `gateway_push_tokens`.
+- **Bounded Exponential Backoff:** Progressive intervals strictly follow `30s` → `60s` → `120s` → `240s` → `480s` (capped at 480 seconds / 8 minutes).
+- **Terminal Dead-Letter State:** When `attempts >= max_attempts` (5 attempts), the outbox item moves to `DEAD_LETTER` with response code `MAX_ATTEMPTS_EXCEEDED`. The underlying SMS job remains safely `QUEUED` in PostgreSQL, protected from data loss.
+- **Admin Dead-Letter Recovery:** Owner administrators can inspect outbox health via `GET /api/v1/admin/outbox/health` (zero PII) and re-queue dead-lettered wake signals via `POST /api/v1/admin/outbox/dead-letter/retry`.
+- **Token Invalidation:** On `UNREGISTERED_TOKEN` (including HTTP 404, `messaging/registration-token-not-registered`), the gateway's token is immediately set to `is_valid = FALSE` in `gateway_push_tokens`. Ambiguous Firebase `invalid-argument` errors do not revoke tokens.
 
 ### 7.4 Minimal High-Priority FCM Wake Payload
 

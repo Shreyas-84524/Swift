@@ -531,3 +531,121 @@ All active tokens belonging to the authenticated gateway are invalidated. The ra
   "error": "Internal server error invalidating push token"
 }
 ```
+
+
+---
+
+## 8. Outbox Recovery & Observability Endpoints (Phase 4)
+
+### 8.1 Internal Batch Dispatcher
+Automated cron/scheduler invocation endpoint for processing queued wake items and recovering stale leases.
+
+- **Method:** `POST`
+- **Path:** `/api/v1/internal/outbox/dispatch`
+- **Auth:** `Authorization: Bearer <OUTBOX_SCHEDULER_SECRET>` (Header ONLY. Query params strictly rejected with 400).
+- **Runtime:** Node.js (Vercel Serverless / Scheduled Cron)
+
+#### Request Body (Optional)
+```json
+{
+  "batch_size": 25,
+  "max_time_ms": 10000
+}
+```
+
+- `batch_size`: integer from 1 through 50.
+- `max_time_ms`: integer from 100 through 30000.
+- Malformed JSON or out-of-range values return `400 Bad Request`.
+- Unexpected internal failures return a generic `500` response without database or Firebase details.
+
+#### Response (`200 OK`)
+```json
+{
+  "success": true,
+  "counts": {
+    "claimed": 5,
+    "sent": 5,
+    "failed": 0,
+    "dead_letter": 0
+  },
+  "duration_ms": 142
+}
+```
+
+---
+
+### 8.2 Outbox Health & Observability
+Aggregated system telemetry for monitoring push health, token statuses, gateways, and queue depths. Zero PII/credentials exposed.
+
+- **Method:** `GET`
+- **Path:** `/api/v1/admin/outbox/health`
+- **Auth:** Authenticated Admin Session / Owner (`requireAdmin`)
+
+#### Response (`200 OK`)
+```json
+{
+  "success": true,
+  "timestamp": "2026-10-25T16:00:00.000Z",
+  "data": {
+    "outbox": {
+      "counts": {
+        "pending": 0,
+        "processing": 0,
+        "sent": 1420,
+        "failed": 2,
+        "dead_letter": 1
+      },
+      "oldest_due_age_seconds": null,
+      "dead_letter_count": 1,
+      "last_wake": {
+        "timestamp": "2026-10-25T15:59:45.000Z",
+        "status": "SENT",
+        "response_code": "SENT",
+        "age_seconds": 15
+      }
+    },
+    "tokens": {
+      "active": 1,
+      "invalid": 0,
+      "gateways_with_active_token": 1
+    },
+    "gateways": {
+      "total_active": 1,
+      "online": 1,
+      "most_recent_seen_at": "2026-10-25T15:59:30.000Z"
+    },
+    "sms_jobs": {
+      "queued": 0,
+      "claimed": 0
+    }
+  }
+}
+```
+
+---
+
+### 8.3 Dead-Letter Outbox Recovery
+Allows administrative re-dispatch of stalled or dead-lettered wake signals.
+**Safety Guard:** Refuses to retry wake signals if the underlying SMS job has already achieved a terminal state (`SENT`, `DELIVERED`, or `EXPIRED`).
+
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/outbox/dead-letter/retry`
+- **Auth:** Authenticated Admin Session (`authorizeAdminMutation`, CSRF Protected)
+
+#### Request Body
+```json
+{
+  "outbox_id": "outbox_uuid_123",
+  "outbox_ids": ["outbox_uuid_456"],
+  "project_id": "optional_project_uuid"
+}
+```
+
+#### Response (`200 OK`)
+```json
+{
+  "success": true,
+  "retried_count": 1,
+  "retried_ids": ["outbox_uuid_123"]
+}
+```

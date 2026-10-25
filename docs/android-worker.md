@@ -9,7 +9,7 @@
 | **Push-Triggered Worker (FCM High-Priority)** | **Primary Production Mechanism** | Immediate push wake-up (<500ms) on demand | Optimal (zero background CPU/network when idle) | Complies with all Android background & Doze policies | ✅ **Phase 3 Production Implementation** (Event-Driven) |
 | **WorkManager (Expedited Worker)** | **Push Execution Host** | Immediate (<100ms) from FCM push service | High (executes single drain pass and finishes) | Subject to OS quota; graceful fallback to in-memory drain | ✅ **Phase 3 Production Implementation** (`JobDrainWorker`) |
 | **WorkManager (Periodic 15-min)** | **Durable Recovery Net** | Periodic (15-minute intervals) | Excellent (runs only when device is awake/connected) | Enforced by OS; catches any unhandled or dropped pushes | ✅ **Phase 3 Production Implementation** (`GatewayRecoveryWorker`) |
-| **Foreground Service (`dataSync`)** | **Connection & Heartbeat Host** | Near real-time heartbeat and status | Moderate (heartbeat every 60s, no continuous polling) | Cumulative 6h/24h timeout when backgrounded on Android 15 | ✅ **Phase 3 Companion Service** (UI, Heartbeat, Lifecycle) |
+| **Foreground Service (`dataSync`)** | **Local API / Companion Lifecycle** | No global polling or periodic heartbeat loop | Depends on local-mode use | Cumulative 6h/24h timeout when backgrounded on Android 15 | ✅ Delivery is independent through FCM + WorkManager |
 | **Continuous HTTP Polling Loop (3–60s)** | **Obsolete / Inefficient** | Sub-second to 60s | Poor (constant radio wakeups, high battery drain) | Battery optimization aggressively throttles background network | ❌ **Completely Removed in Phase 3** |
 
 ---
@@ -226,3 +226,26 @@ Push tokens are coordinated centrally through `FcmTokenCoordinator`:
 |  Device ID:   gw_android_dev_test        |
 +------------------------------------------+
 ```
+
+---
+
+### 1.4 Phase 4 Reliability Hardening
+
+Phase 4 introduces operational resilience against network drops, process death, and continuous radio drain:
+
+1. **WorkManager Exponential Backoff on JobDrainWorker:**
+   - `JobDrainWorker.enqueueExpedited` applies `setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)`.
+   - In `doWork()`, if transient errors occur (`summary.retryRecommended == true`), retry is permitted up to 3 attempts (`runAttemptCount < 3`).
+   - If `runAttemptCount >= 3`, the worker terminates with `Result.failure()` to prevent an infinite expedited work loop, cleanly yielding recovery to the 15-minute periodic `GatewayRecoveryWorker`.
+
+2. **Token Registration Resumption Across Process Death:**
+   - Fresh push tokens from Firebase `onNewToken` are persisted synchronously to `EncryptedSharedPreferences` before initiating any network calls.
+   - If the application process terminates before server registration succeeds, `GatewayRecoveryWorker` triggers `FcmTokenCoordinator.syncToken()` on its next scheduled 15-minute cycle, ensuring backend registration resumes automatically.
+
+3. **Elimination of Continuous 60s Background Heartbeat:**
+   - The repetitive 60-second background polling/heartbeat loop in `GlobalGatewayWorker` has been eliminated.
+   - Initial heartbeats occur on worker startup and manual sync requests; periodic health heartbeats are dispatched every 15 minutes by `GatewayRecoveryWorker`.
+   - This eliminates continuous radio wakeups and extends battery life substantially.
+
+4. **Single-Flight In-Flight Mutex Deduplication:**
+   - Concurrent drain requests from push wakes, periodic recovery, or UI sync are serialized through a single-flight `Mutex` and in-memory in-flight set, completely preventing concurrent duplicate carrier SMS dispatch.

@@ -6,7 +6,7 @@ This guide details the setup, maintenance, carrier considerations, and Android r
 
 ## 1. Gateway Worker Architecture
 
-The Android Gateway application acts as a secure, outbound-only client worker that polls the central Global OTP Backend, claims pending SMS jobs, and dispatches them via the device's physical cellular modem.
+The Android Gateway application acts as a secure, outbound-only client worker. FCM wakes it when work is available; it then claims pending jobs from the Global OTP Backend and dispatches them through the device's physical cellular modem. A 15-minute WorkManager reconciliation is the fallback.
 
 ```text
 +-----------------------------------------------------------------------------------+
@@ -122,7 +122,7 @@ For long-term, continuous 24/7 unattended production operation on Android 15:
 4. A persistent notification titled **"SMS Gateway Active (Global Worker)"** will appear in the notification shade.
 
 ### Inspecting Live Logs
-Connect the device via ADB to monitor real-time polling and dispatch logs:
+Connect the device via ADB to monitor event-driven wake and dispatch logs:
 ```bash
 adb logcat -s SmsGatewayService:V SmsSender:V GlobalWorkerManager:V
 ```
@@ -150,3 +150,63 @@ D/GlobalWorkerManager: Reported job 7e43b6a2 as SENT.
 
 3. **Modem returns `RESULT_UNKNOWN_124`:**
    - Verify that `requestDeliveryReports` is set to `false` and `deliveredIntent` is `null` in the build.
+
+
+---
+
+## 6. Physical Acceptance Test Checklist (Phase 4 Production Verification)
+
+This checklist provides step-by-step physical test verification procedures for operators and QA on physical Android hardware.
+
+### Test Case 1: Screen-Off Doze Delivery (<1s Wakeup)
+- **Pre-condition:** Phone is in `GLOBAL_WORKER` mode with service running. Screen is turned off and unplugged for 15 minutes to allow Android Doze mode engagement.
+- **Action:** Execute an OTP send request:
+  ```bash
+  curl -X POST https://<domain>/api/v1/otp/send \
+    -H "X-Project-Key: otp_proj_live_..." \
+    -H "Content-Type: application/json" \
+    -d '{"phone_number": "+919876543210"}'
+  ```
+- **Expected Result:**
+  - FCM High-Priority wake arrives at device.
+  - `JobDrainWorker` claims job within <500ms.
+  - Physical modem dispatches SMS; carrier delivery confirmed.
+  - Zero screen-turn-on required.
+
+### Test Case 2: Transient Network Disconnect & 15-Minute Recovery Sweep
+- **Pre-condition:** Enable Airplane Mode on the gateway phone.
+- **Action:** Send an OTP challenge via `/api/v1/otp/send`.
+  - Immediate FCM wake fails due to device unreachability.
+  - Backend records outbox entry as `FAILED` with exponential backoff.
+  - Wait 2 minutes, then disable Airplane Mode.
+- **Expected Result:**
+  - When network is restored, the next background cron dispatch (`/api/v1/internal/outbox/dispatch`) or the 15-minute `GatewayRecoveryWorker` claims and delivers the queued SMS job.
+  - Zero jobs dropped or lost.
+
+### Test Case 3: Process Termination & Push Token Rotation Resumption
+- **Pre-condition:** App running with valid token.
+- **Action:** Force-stop the application via ADB:
+  ```bash
+  adb shell am force-stop com.multi.encription.sms
+  ```
+  - Trigger token refresh in Firebase or simulate pending token in secure storage.
+- **Expected Result:**
+  - Pending token remains safely preserved in `EncryptedSharedPreferences`.
+  - When `GatewayRecoveryWorker` executes its periodic sweep, it invokes `syncToken()`, automatically registering the fresh token with the backend without requiring manual user intervention.
+
+### Test Case 4: Dead-Letter Administration & Safe Recovery
+- **Pre-condition:** An outbox item exceeds 5 maximum delivery attempts (status moves to `DEAD_LETTER`).
+- **Action:**
+  1. Inspect `GET /api/v1/admin/outbox/health`.
+  2. Confirm `dead_letter_count >= 1` and zero PII (no phone numbers, OTPs, or keys) present in telemetry.
+  3. Execute authenticated recovery:
+     ```bash
+     curl -X POST https://<domain>/api/v1/admin/outbox/dead-letter/retry \
+       -H "Cookie: <owner_session>" \
+       -H "Content-Type: application/json" \
+       -d '{"outbox_id": "<dead_letter_outbox_id>"}'
+     ```
+- **Expected Result:**
+  - Endpoint returns `{"success": true, "retried_count": 1}`.
+  - Outbox status transitions back to `PENDING` with `attempts = 0`.
+  - If the underlying SMS job was already `SENT` or `DELIVERED`, retry is safely skipped.

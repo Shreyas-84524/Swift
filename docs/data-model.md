@@ -315,10 +315,16 @@ Guaranteed transactional delivery queue for outbound push notifications to gatew
 - `max_attempts` (INTEGER, DEFAULT 5).
 - `last_attempt_at` (TIMESTAMPTZ, NULLABLE).
 - `next_attempt_at` (TIMESTAMPTZ, DEFAULT NOW()).
+- `lease_expires_at` (TIMESTAMPTZ, NULLABLE): Added in Migration 007 for distributed lease tracking. Set to `NOW() + INTERVAL '2 minutes'` when transitioning to `PROCESSING`. Enables stale-worker lease recovery after crashed invocations.
 - `response_code` (VARCHAR(50), NULLABLE).
 - `error_message` (TEXT, NULLABLE).
+- `deduplication_key` (VARCHAR(128), UNIQUE, NULLABLE): Prevents duplicate wake generation per SMS challenge.
 - `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
 - `sent_at` (TIMESTAMPTZ, NULLABLE).
+
+#### Migration 007 Recovery Partial Indexes
+- `idx_notification_outbox_due`: Partial index on `(priority DESC, next_attempt_at ASC, created_at ASC) WHERE status IN ('PENDING', 'FAILED')` for high-throughput batch claiming via `FOR UPDATE SKIP LOCKED`.
+- `idx_notification_outbox_stale_leases`: Partial index on `(lease_expires_at ASC) WHERE status = 'PROCESSING'` for instant zero-table-scan detection of abandoned or crashed processing leases.
 
 ---
 
