@@ -2,345 +2,787 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/main"
+    android:id="@+id/mainCoordinator"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/swift_bg"
     tools:context=".MainActivity">
 
-    <LinearLayout
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/mainScrollView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:fillViewport="true">
 
-        <ImageView
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:layout_gravity="center_horizontal"
-            android:src="@drawable/swift_logo"
-            android:contentDescription="@string/swift_logo_description"
-            android:layout_marginBottom="8dp" />
-
-        <!-- Title -->
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:layout_marginBottom="12dp" />
+            android:orientation="vertical"
+            android:paddingHorizontal="@dimen/spacing_lg"
+            android:paddingTop="@dimen/spacing_md"
+            android:paddingBottom="@dimen/spacing_3xl">
 
-        <!-- Mode Toggle Segmented Group -->
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/modeToggleGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            app:singleSelection="true"
-            app:selectionRequired="true">
-
-            <Button
-                android:id="@+id/btnModeGlobal"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Global Worker"
-                style="@style/Widget.Material3.Button.OutlinedButton" />
-
-            <Button
-                android:id="@+id/btnModeLocal"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Local API (Legacy)"
-                style="@style/Widget.Material3.Button.OutlinedButton" />
-
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <!-- Global Worker Dashboard Card -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/globalWorkerCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="3dp">
-
+            <!-- App Header Bar -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="14dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="@dimen/spacing_md">
 
-                <com.google.android.material.switchmaterial.SwitchMaterial
-                    android:id="@+id/workerToggle"
+                <ImageView
+                    android:id="@+id/appLogoImage"
+                    android:layout_width="@dimen/app_header_logo_size"
+                    android:layout_height="@dimen/app_header_logo_size"
+                    android:src="@drawable/swift_logo"
+                    android:contentDescription="@string/swift_logo_description"
+                    android:layout_marginEnd="@dimen/spacing_md" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/appTitleText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/app_gateway_title"
+                        android:textAppearance="@style/TextAppearance.Swift.Headline"
+                        android:textSize="@dimen/text_size_title_lg"
+                        android:accessibilityHeading="true" />
+
+                    <TextView
+                        android:id="@+id/appSubtitleText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/app_gateway_tagline"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/btnHeaderSettings"
+                    android:layout_width="@dimen/min_touch_target"
+                    android:layout_height="@dimen/min_touch_target"
+                    android:src="@drawable/ic_settings"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_settings"
+                    app:tint="@color/swift_text_secondary" />
+
+            </LinearLayout>
+
+            <!-- 1. HERO CARD: Prominent Gateway Status -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/heroStatusCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/spacing_md"
+                style="@style/Widget.Swift.CardView.Hero">
+
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Enable Global Worker"
-                    android:textStyle="bold"
-                    android:textSize="16sp"
-                    android:layout_marginBottom="8dp" />
+                    android:orientation="vertical"
+                    android:padding="@dimen/card_padding_inner">
 
-                <TextView
-                    android:id="@+id/workerBackendStatusText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Backend: Checking..."
-                    android:textSize="13sp"
-                    android:layout_marginBottom="4dp" />
+                    <!-- Status Header with Indicator Icon and Title -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="@dimen/spacing_xs">
 
-                <TextView
-                    android:id="@+id/workerSimStatusText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="SIM Status: READY"
-                    android:textSize="13sp"
-                    android:layout_marginBottom="4dp" />
+                        <ImageView
+                            android:id="@+id/heroStatusIcon"
+                            android:layout_width="@dimen/icon_size_lg"
+                            android:layout_height="@dimen/icon_size_lg"
+                            android:src="@drawable/ic_status_ready"
+                            android:contentDescription="@null"
+                            android:layout_marginEnd="@dimen/spacing_sm"
+                            app:tint="@color/swift_status_success" />
 
-                <TextView
-                    android:id="@+id/workerLastSyncText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Last Sync: Never"
-                    android:textSize="12sp"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:layout_marginBottom="4dp" />
+                        <TextView
+                            android:id="@+id/heroStatusTitle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/status_ready_title"
+                            android:textAppearance="@style/TextAppearance.Swift.Headline"
+                            android:textSize="@dimen/text_size_title" />
 
-                <TextView
-                    android:id="@+id/workerLastJobText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Status: Idle"
-                    android:textSize="12sp"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:layout_marginBottom="8dp" />
+                        <!-- Active progress indicator for syncing/connecting -->
+                        <ProgressBar
+                            android:id="@+id/heroProgressBar"
+                            style="?android:attr/progressBarStyleSmall"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:indeterminateTint="@color/swift_brand_primary"
+                            android:visibility="gone" />
 
-                <!-- Latest Telephony Diagnostics Tile -->
+                    </LinearLayout>
+
+                    <!-- Status Plain-Language Explanation -->
+                    <TextView
+                        android:id="@+id/heroStatusDescription"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/status_ready_desc"
+                        android:textAppearance="@style/TextAppearance.Swift.Body"
+                        android:layout_marginBottom="@dimen/spacing_sm" />
+
+                    <!-- Last Successful Sync Timestamp -->
+                    <TextView
+                        android:id="@+id/heroLastSyncText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/last_sync_never"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption"
+                        android:layout_marginBottom="@dimen/spacing_md" />
+
+                    <!-- Primary Hero Action Button -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/heroPrimaryActionButton"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/button_min_height"
+                            android:layout_weight="1"
+                            android:text="@string/action_sync_now"
+                            android:layout_marginEnd="@dimen/spacing_sm"
+                            style="@style/Widget.Swift.Button" />
+
+                        <Button
+                            android:id="@+id/heroConfigureButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/button_min_height"
+                            android:text="@string/action_configure"
+                            style="@style/Widget.Swift.Button.Outlined" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- 2. SECONDARY HEALTH INDICATORS (2x2 Grid) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="@dimen/spacing_sm">
+
+                <!-- Cloud Link Tile -->
                 <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/diagnosticsCard"
-                    android:layout_width="match_parent"
+                    android:id="@+id/healthCloudCard"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="10dp"
-                    android:visibility="gone"
-                    app:cardElevation="0dp"
-                    app:strokeWidth="1dp"
-                    app:strokeColor="?attr/colorOutlineVariant"
-                    app:cardCornerRadius="6dp">
+                    android:layout_weight="1"
+                    android:layout_marginEnd="@dimen/spacing_xs"
+                    style="@style/Widget.Swift.CardView.HealthTile">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="@dimen/card_padding_compact">
 
-                        <TextView
-                            android:id="@+id/diagnosticsTitleText"
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Latest Telephony Diagnostics"
-                            android:textStyle="bold"
-                            android:textSize="12sp"
-                            android:layout_marginBottom="4dp" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="@dimen/spacing_2xs">
+
+                            <ImageView
+                                android:layout_width="@dimen/icon_size_sm"
+                                android:layout_height="@dimen/icon_size_sm"
+                                android:src="@drawable/ic_health_cloud"
+                                android:contentDescription="@null"
+                                android:layout_marginEnd="@dimen/spacing_xs"
+                                app:tint="@color/swift_text_secondary" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/health_cloud_label"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
 
                         <TextView
-                            android:id="@+id/diagnosticsDetailText"
+                            android:id="@+id/healthCloudStatusText"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="No errors recorded."
-                            android:fontFamily="monospace"
-                            android:textSize="11sp"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:layout_marginBottom="4dp" />
-
-                        <Button
-                            android:id="@+id/btnCopyDiagnostics"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Copy Diagnostics"
-                            android:textSize="11sp"
-                            style="@style/Widget.Material3.Button.TextButton" />
+                            android:text="@string/health_cloud_checking"
+                            android:textAppearance="@style/TextAppearance.Swift.Title"
+                            android:textSize="@dimen/text_size_body_sm" />
 
                     </LinearLayout>
 
                 </com.google.android.material.card.MaterialCardView>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <!-- Push Wake Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/healthPushCard"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/spacing_xs"
+                    style="@style/Widget.Swift.CardView.HealthTile">
 
-                    <Button
-                        android:id="@+id/btnSyncNow"
-                        android:layout_width="0dp"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Sync Now"
-                        android:textSize="12sp"
-                        android:layout_marginEnd="4dp"
-                        style="@style/Widget.Material3.Button.TonalButton" />
+                        android:orientation="vertical"
+                        android:padding="@dimen/card_padding_compact">
 
-                    <Button
-                        android:id="@+id/btnTestConnection"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Test Link"
-                        android:textSize="12sp"
-                        android:layout_marginEnd="4dp"
-                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="@dimen/spacing_2xs">
 
-                    <Button
-                        android:id="@+id/btnConfigGateway"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Configure"
-                        android:textSize="12sp"
-                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                            <ImageView
+                                android:layout_width="@dimen/icon_size_sm"
+                                android:layout_height="@dimen/icon_size_sm"
+                                android:src="@drawable/ic_health_fcm"
+                                android:contentDescription="@null"
+                                android:layout_marginEnd="@dimen/spacing_xs"
+                                app:tint="@color/swift_text_secondary" />
 
-                </LinearLayout>
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/health_push_label"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/healthPushStatusText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/health_push_pending"
+                            android:textAppearance="@style/TextAppearance.Swift.Title"
+                            android:textSize="@dimen/text_size_body_sm" />
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
 
             </LinearLayout>
-
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Local API Server Card (Legacy) -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/localApiCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:visibility="gone"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="3dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="14dp">
+                android:orientation="horizontal"
+                android:layout_marginBottom="@dimen/spacing_lg">
 
-                <TextView
-                    android:id="@+id/serverStatusText"
-                    android:layout_width="match_parent"
+                <!-- Cellular SIM Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/healthSimCard"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="Server Status: Stopped"
-                    android:textSize="15sp"
-                    android:layout_marginBottom="6dp" />
+                    android:layout_weight="1"
+                    android:layout_marginEnd="@dimen/spacing_xs"
+                    style="@style/Widget.Swift.CardView.HealthTile">
 
-                <com.google.android.material.switchmaterial.SwitchMaterial
-                    android:id="@+id/serverToggle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Enable Local API Server"
-                    android:layout_marginBottom="10dp" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="@dimen/card_padding_compact">
 
-                <TextView
-                    android:id="@+id/apiKeyText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="API Key: Loading..."
-                    android:textSize="13sp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:padding="6dp"
-                    android:layout_marginBottom="4dp" />
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="@dimen/spacing_2xs">
 
-                <TextView
-                    android:id="@+id/portText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Port: 8080"
-                    android:textSize="13sp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:padding="6dp"
-                    android:layout_marginBottom="8dp" />
+                            <ImageView
+                                android:layout_width="@dimen/icon_size_sm"
+                                android:layout_height="@dimen/icon_size_sm"
+                                android:src="@drawable/ic_health_sim"
+                                android:contentDescription="@null"
+                                android:layout_marginEnd="@dimen/spacing_xs"
+                                app:tint="@color/swift_text_secondary" />
 
-                <TextView
-                    android:id="@+id/apiUrlsText"
-                    android:layout_width="match_parent"
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/health_sim_label"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/healthSimStatusText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/health_sim_ready"
+                            android:textAppearance="@style/TextAppearance.Swift.Title"
+                            android:textSize="@dimen/text_size_body_sm" />
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Background Worker Tile -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/healthWorkerCard"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="API URLs: Loading..."
-                    android:textSize="11sp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:padding="6dp"
-                    android:layout_marginBottom="8dp"
-                    android:fontFamily="monospace" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/spacing_xs"
+                    style="@style/Widget.Swift.CardView.HealthTile">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="@dimen/card_padding_compact">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="@dimen/spacing_2xs">
+
+                            <ImageView
+                                android:layout_width="@dimen/icon_size_sm"
+                                android:layout_height="@dimen/icon_size_sm"
+                                android:src="@drawable/ic_health_worker"
+                                android:contentDescription="@null"
+                                android:layout_marginEnd="@dimen/spacing_xs"
+                                app:tint="@color/swift_text_secondary" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/health_worker_label"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/healthWorkerStatusText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/health_worker_paused"
+                            android:textAppearance="@style/TextAppearance.Swift.Title"
+                            android:textSize="@dimen/text_size_body_sm" />
+
+                    </LinearLayout>
+
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+
+            <!-- 3. SETTINGS & DIAGNOSTICS CARD -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/settingsCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/spacing_lg"
+                style="@style/Widget.Swift.CardView.Outlined">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="vertical"
+                    android:padding="@dimen/card_padding_inner">
 
-                    <Button
-                        android:id="@+id/testApiButton"
-                        android:layout_width="0dp"
+                    <TextView
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="6dp"
-                        android:text="Test Local API"
-                        android:textSize="12sp"
-                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                        android:text="@string/settings_title"
+                        android:textAppearance="@style/TextAppearance.Swift.Headline"
+                        android:textSize="@dimen/text_size_title"
+                        android:layout_marginBottom="@dimen/spacing_md"
+                        android:accessibilityHeading="true" />
 
-                    <Button
-                        android:id="@+id/externalDomainButton"
-                        android:layout_width="0dp"
+                    <!-- Mode Toggle Segmented Group -->
+                    <TextView
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="External Domain"
-                        android:textSize="12sp"
-                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                        android:text="@string/settings_mode_label"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption"
+                        android:layout_marginBottom="@dimen/spacing_xs" />
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/modeToggleGroup"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="@dimen/spacing_md"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+
+                        <Button
+                            android:id="@+id/btnModeGlobal"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/button_small_height"
+                            android:layout_weight="1"
+                            android:text="@string/settings_mode_global"
+                            android:textSize="@dimen/text_size_body_sm"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                        <Button
+                            android:id="@+id/btnModeLocal"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/button_small_height"
+                            android:layout_weight="1"
+                            android:text="@string/settings_mode_local"
+                            android:textSize="@dimen/text_size_body_sm"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <!-- Global Worker Switch -->
+                    <LinearLayout
+                        android:id="@+id/workerSwitchContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="@dimen/spacing_md">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_worker_switch"
+                                android:textAppearance="@style/TextAppearance.Swift.Title"
+                                android:textSize="@dimen/text_size_body" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_worker_desc"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/workerToggle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="@string/settings_worker_switch" />
+
+                    </LinearLayout>
+
+                    <!-- Battery Optimization Status -->
+                    <LinearLayout
+                        android:id="@+id/batteryContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="@dimen/spacing_md">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_battery_title"
+                                android:textAppearance="@style/TextAppearance.Swift.Title"
+                                android:textSize="@dimen/text_size_body" />
+
+                            <TextView
+                                android:id="@+id/batteryStatusText"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_battery_unrestricted"
+                                android:textAppearance="@style/TextAppearance.Swift.Caption" />
+
+                        </LinearLayout>
+
+                        <Button
+                            android:id="@+id/btnBatteryOptimization"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/button_small_height"
+                            android:text="@string/settings_battery_action"
+                            android:textSize="@dimen/text_size_caption"
+                            style="@style/Widget.Material3.Button.TextButton" />
+
+                    </LinearLayout>
+
+                    <!-- Advanced Diagnostics Accordion -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/swift_divider"
+                        android:layout_marginBottom="@dimen/spacing_md" />
+
+                    <TextView
+                        android:id="@+id/diagnosticsHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/diagnostics_section_title"
+                        android:textAppearance="@style/TextAppearance.Swift.Title"
+                        android:textSize="@dimen/text_size_body"
+                        android:layout_marginBottom="@dimen/spacing_sm"
+                        android:accessibilityHeading="true" />
+
+                    <TextView
+                        android:id="@+id/diagnosticsAppVersionText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Version 1.0 (1)"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption"
+                        android:layout_marginBottom="@dimen/spacing_xs" />
+
+                    <TextView
+                        android:id="@+id/diagnosticsPushTokenText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="FCM Push: Pending"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption"
+                        android:fontFamily="monospace"
+                        android:layout_marginBottom="@dimen/spacing_xs" />
+
+                    <TextView
+                        android:id="@+id/diagnosticsDetailText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/diagnostics_no_data"
+                        android:textAppearance="@style/TextAppearance.Swift.Caption"
+                        android:fontFamily="monospace"
+                        android:padding="@dimen/spacing_sm"
+                        android:background="@drawable/bg_status_pill"
+                        android:layout_marginBottom="@dimen/spacing_md" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnTestConnection"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/button_small_height"
+                            android:layout_weight="1"
+                            android:text="@string/action_test_connection"
+                            android:textSize="@dimen/text_size_body_sm"
+                            android:layout_marginEnd="@dimen/spacing_xs"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                        <Button
+                            android:id="@+id/btnCopyDiagnostics"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/button_small_height"
+                            android:layout_weight="1"
+                            android:text="@string/action_copy_diagnostics"
+                            android:textSize="@dimen/text_size_body_sm"
+                            android:layout_marginStart="@dimen/spacing_xs"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                    </LinearLayout>
+
+                    <!-- Legacy Local API Section (Visible only when Legacy Mode selected) -->
+                    <LinearLayout
+                        android:id="@+id/legacyLocalApiContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone"
+                        android:layout_marginTop="@dimen/spacing_md">
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/swift_divider"
+                            android:layout_marginBottom="@dimen/spacing_md" />
+
+                        <TextView
+                            android:id="@+id/serverStatusText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/legacy_server_status_stopped"
+                            android:textAppearance="@style/TextAppearance.Swift.Title"
+                            android:textSize="@dimen/text_size_body"
+                            android:layout_marginBottom="@dimen/spacing_xs" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/serverToggle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/legacy_enable_server"
+                            android:layout_marginBottom="@dimen/spacing_sm" />
+
+                        <TextView
+                            android:id="@+id/apiKeyText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="API Key: (tap to view)"
+                            android:textAppearance="@style/TextAppearance.Swift.Caption"
+                            android:fontFamily="monospace"
+                            android:padding="@dimen/spacing_xs"
+                            android:layout_marginBottom="@dimen/spacing_xs" />
+
+                        <TextView
+                            android:id="@+id/portText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Port: 8080 (tap to change)"
+                            android:textAppearance="@style/TextAppearance.Swift.Caption"
+                            android:padding="@dimen/spacing_xs"
+                            android:layout_marginBottom="@dimen/spacing_xs" />
+
+                        <TextView
+                            android:id="@+id/apiUrlsText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Swift.Caption"
+                            android:fontFamily="monospace"
+                            android:padding="@dimen/spacing_xs"
+                            android:layout_marginBottom="@dimen/spacing_sm" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <Button
+                                android:id="@+id/testApiButton"
+                                android:layout_width="0dp"
+                                android:layout_height="@dimen/button_small_height"
+                                android:layout_weight="1"
+                                android:text="@string/legacy_test_api"
+                                android:textSize="@dimen/text_size_caption"
+                                android:layout_marginEnd="@dimen/spacing_xs"
+                                style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                            <Button
+                                android:id="@+id/externalDomainButton"
+                                android:layout_width="0dp"
+                                android:layout_height="@dimen/button_small_height"
+                                android:layout_weight="1"
+                                android:text="@string/legacy_external_domain"
+                                android:textSize="@dimen/text_size_caption"
+                                android:layout_marginStart="@dimen/spacing_xs"
+                                style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
 
                 </LinearLayout>
 
-            </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- SMS History Section -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="3dp">
-
+            <!-- 4. DISPATCH ACTIVITY / HISTORY SECTION -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="@dimen/spacing_sm">
 
                 <TextView
-                    android:layout_width="match_parent"
+                    android:id="@+id/historySectionTitle"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="SMS Dispatch History"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:padding="12dp"
-                    android:background="?attr/colorPrimary"
-                    android:textColor="?attr/colorOnPrimary" />
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/smsHistoryRecyclerView"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:padding="8dp"
-                    tools:listitem="@layout/item_sms_history" />
+                    android:text="@string/history_section_title"
+                    android:textAppearance="@style/TextAppearance.Swift.Headline"
+                    android:textSize="@dimen/text_size_title"
+                    android:accessibilityHeading="true" />
+
+                <TextView
+                    android:id="@+id/historyCountText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Swift.Caption"
+                    android:layout_marginEnd="@dimen/spacing_sm"
+                    tools:text="0 dispatched" />
+
+                <Button
+                    android:id="@+id/btnClearHistory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/button_small_height"
+                    android:text="@string/action_clear_history"
+                    android:textSize="@dimen/text_size_caption"
+                    style="@style/Widget.Material3.Button.TextButton" />
 
             </LinearLayout>
 
-        </com.google.android.material.card.MaterialCardView>
+            <!-- Empty State Display -->
+            <LinearLayout
+                android:id="@+id/historyEmptyView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:paddingVertical="@dimen/spacing_3xl"
+                android:paddingHorizontal="@dimen/spacing_xl"
+                android:visibility="gone">
 
-    </LinearLayout>
+                <ImageView
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@drawable/ic_empty_history"
+                    android:contentDescription="@null"
+                    android:layout_marginBottom="@dimen/spacing_md"
+                    app:tint="@color/swift_text_tertiary" />
 
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/history_empty_title"
+                    android:textAppearance="@style/TextAppearance.Swift.Title"
+                    android:textSize="@dimen/text_size_body"
+                    android:layout_marginBottom="@dimen/spacing_xs" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/history_empty_desc"
+                    android:textAppearance="@style/TextAppearance.Swift.Caption"
+                    android:gravity="center" />
+
+            </LinearLayout>
+
+            <!-- SMS History RecyclerView -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/smsHistoryRecyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"
+                tools:listitem="@layout/item_sms_history" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- Floating Action Button for manual SMS testing -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/sendSmsFab"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
+        android:layout_margin="@dimen/spacing_lg"
         android:src="@android:drawable/ic_dialog_email"
-        app:tint="?attr/colorOnSecondaryContainer" />
+        android:contentDescription="@string/action_send_test_sms"
+        app:tint="@color/white"
+        app:backgroundTint="@color/swift_brand_primary" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -4,77 +4,87 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="4dp"
-    app:cardCornerRadius="8dp"
-    app:cardElevation="2dp"
-    android:foreground="?android:attr/selectableItemBackground">
+    android:layout_marginHorizontal="@dimen/spacing_none"
+    android:layout_marginVertical="@dimen/spacing_xs"
+    android:minHeight="@dimen/min_touch_target"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?android:attr/selectableItemBackground"
+    style="@style/Widget.Swift.CardView.Outlined">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="12dp">
+        android:paddingHorizontal="@dimen/spacing_lg"
+        android:paddingVertical="@dimen/spacing_md">
 
+        <!-- Top Header: Masked Phone & Status Pill Badge -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="4dp">
+            android:gravity="center_vertical"
+            android:layout_marginBottom="@dimen/spacing_xs">
 
             <TextView
                 android:id="@+id/phoneNumberText"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textStyle="bold"
-                android:textSize="16sp"
-                tools:text="+1234567890" />
+                android:textAppearance="@style/TextAppearance.Swift.Title"
+                android:fontFamily="monospace"
+                android:textColor="@color/swift_text_primary"
+                tools:text="+91 ••••• ••210" />
 
+            <!-- Restrained Status Pill Badge -->
             <TextView
                 android:id="@+id/statusText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
+                android:paddingHorizontal="@dimen/spacing_sm"
+                android:paddingVertical="@dimen/spacing_2xs"
+                android:background="@drawable/bg_status_pill"
+                android:textAppearance="@style/TextAppearance.Swift.Caption"
                 android:textStyle="bold"
-                android:background="@drawable/status_background"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="2dp"
                 tools:text="SENT" />
 
         </LinearLayout>
 
+        <!-- Message Body Preview (OTP Masked for Privacy) -->
         <TextView
             android:id="@+id/messageText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:layout_marginBottom="4dp"
+            android:textAppearance="@style/TextAppearance.Swift.Body"
             android:maxLines="2"
             android:ellipsize="end"
-            tools:text="This is a sample SMS message that might be quite long..." />
+            android:layout_marginBottom="@dimen/spacing_sm"
+            tools:text="Your Swift security verification code is ••••••. Valid for 5 minutes." />
 
+        <!-- Bottom Metadata: Relative Time & Job/Carrier Indicator -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/timestampText"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="@android:color/darker_gray"
-                tools:text="Dec 25, 14:30" />
+                android:textAppearance="@style/TextAppearance.Swift.Caption"
+                tools:text="2m ago" />
 
             <TextView
                 android:id="@+id/requestIdText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="10sp"
-                android:textColor="@android:color/darker_gray"
+                android:textAppearance="@style/TextAppearance.Swift.Caption"
+                android:fontFamily="monospace"
                 android:visibility="gone"
-                tools:text="ID: abc12345..."
+                tools:text="Job: 8d2a1b…"
                 tools:visibility="visible" />
 
         </LinearLayout>

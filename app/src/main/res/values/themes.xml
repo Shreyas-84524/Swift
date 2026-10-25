@@ -1,15 +1,115 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.Swift" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#171717</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#171717</item>
-        <item name="colorOnSecondary">#FFFFFF</item>
-        <item name="colorPrimaryContainer">#EDEDED</item>
-        <item name="colorOnPrimaryContainer">#171717</item>
-        <item name="colorSecondaryContainer">#EDEDED</item>
-        <item name="colorOnSecondaryContainer">#171717</item>
+        <item name="android:statusBarColor">@color/swift_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/swift_bg</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+
+        <!-- Material3 Color Tokens -->
+        <item name="colorPrimary">@color/swift_brand_primary</item>
+        <item name="colorOnPrimary">@color/swift_brand_on_primary</item>
+        <item name="colorPrimaryContainer">@color/swift_brand_container</item>
+        <item name="colorOnPrimaryContainer">@color/swift_brand_on_container</item>
+
+        <item name="colorSecondary">@color/swift_text_secondary</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorSecondaryContainer">@color/swift_surface_variant</item>
+        <item name="colorOnSecondaryContainer">@color/swift_text_primary</item>
+
+        <item name="colorSurface">@color/swift_surface</item>
+        <item name="colorOnSurface">@color/swift_text_primary</item>
+        <item name="colorSurfaceVariant">@color/swift_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/swift_text_secondary</item>
+        <item name="colorOutline">@color/swift_outline</item>
+        <item name="colorOutlineVariant">@color/swift_outline_variant</item>
+        <item name="android:colorBackground">@color/swift_bg</item>
+
+        <!-- Typography & Component Defaults -->
+        <item name="materialCardViewStyle">@style/Widget.Swift.CardView</item>
+        <item name="materialButtonStyle">@style/Widget.Swift.Button</item>
     </style>
 
     <style name="Theme.Swift" parent="Base.Theme.Swift" />
+
+    <!-- Card Styles -->
+    <style name="Widget.Swift.CardView" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">@dimen/card_corner_radius</item>
+        <item name="cardElevation">@dimen/card_elevation_subtle</item>
+        <item name="cardBackgroundColor">@color/swift_surface</item>
+        <item name="strokeWidth">@dimen/card_stroke_width</item>
+        <item name="strokeColor">@color/swift_outline</item>
+    </style>
+
+    <style name="Widget.Swift.CardView.Outlined" parent="Widget.Material3.CardView.Outlined">
+        <item name="cardCornerRadius">@dimen/card_corner_radius</item>
+        <item name="cardElevation">@dimen/card_elevation_flat</item>
+        <item name="cardBackgroundColor">@color/swift_surface</item>
+        <item name="strokeWidth">@dimen/card_stroke_width</item>
+        <item name="strokeColor">@color/swift_outline</item>
+    </style>
+
+    <style name="Widget.Swift.CardView.Hero" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">@dimen/card_corner_radius</item>
+        <item name="cardElevation">1dp</item>
+        <item name="cardBackgroundColor">@color/swift_surface</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="strokeColor">@color/swift_outline</item>
+    </style>
+
+    <style name="Widget.Swift.CardView.HealthTile" parent="Widget.Material3.CardView.Outlined">
+        <item name="cardCornerRadius">@dimen/radius_md</item>
+        <item name="cardElevation">@dimen/card_elevation_flat</item>
+        <item name="cardBackgroundColor">@color/swift_surface</item>
+        <item name="strokeWidth">@dimen/card_stroke_width</item>
+        <item name="strokeColor">@color/swift_outline_variant</item>
+    </style>
+
+    <!-- Button Styles -->
+    <style name="Widget.Swift.Button" parent="Widget.Material3.Button">
+        <item name="android:minHeight">@dimen/button_min_height</item>
+        <item name="cornerRadius">@dimen/radius_sm</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <style name="Widget.Swift.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:minHeight">@dimen/button_min_height</item>
+        <item name="cornerRadius">@dimen/radius_sm</item>
+        <item name="strokeColor">@color/swift_outline</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="android:textColor">@color/swift_text_primary</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <style name="Widget.Swift.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minHeight">@dimen/button_min_height</item>
+        <item name="cornerRadius">@dimen/radius_sm</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+    </style>
+
+    <!-- Typography Styles -->
+    <style name="TextAppearance.Swift.Headline" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:textColor">@color/swift_text_primary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">@dimen/text_size_headline</item>
+    </style>
+
+    <style name="TextAppearance.Swift.Title" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textColor">@color/swift_text_primary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">@dimen/text_size_title</item>
+    </style>
+
+    <style name="TextAppearance.Swift.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/swift_text_secondary</item>
+        <item name="android:textSize">@dimen/text_size_body</item>
+    </style>
+
+    <style name="TextAppearance.Swift.Caption" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textColor">@color/swift_text_tertiary</item>
+        <item name="android:textSize">@dimen/text_size_caption</item>
+    </style>
 </resources>

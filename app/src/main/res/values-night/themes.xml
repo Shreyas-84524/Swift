@@ -1,13 +1,32 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Base application theme for dark mode. -->
     <style name="Base.Theme.Swift" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#FFFFFF</item>
-        <item name="colorOnPrimary">#171717</item>
-        <item name="colorSecondary">#FFFFFF</item>
-        <item name="colorOnSecondary">#171717</item>
-        <item name="colorPrimaryContainer">#303030</item>
-        <item name="colorOnPrimaryContainer">#FFFFFF</item>
-        <item name="colorSecondaryContainer">#303030</item>
-        <item name="colorOnSecondaryContainer">#FFFFFF</item>
+        <item name="android:statusBarColor">@color/swift_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/swift_bg</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+
+        <!-- Material3 Color Tokens -->
+        <item name="colorPrimary">@color/swift_brand_primary</item>
+        <item name="colorOnPrimary">@color/swift_brand_on_primary</item>
+        <item name="colorPrimaryContainer">@color/swift_brand_container</item>
+        <item name="colorOnPrimaryContainer">@color/swift_brand_on_container</item>
+
+        <item name="colorSecondary">@color/swift_text_secondary</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="colorSecondaryContainer">@color/swift_surface_variant</item>
+        <item name="colorOnSecondaryContainer">@color/swift_text_primary</item>
+
+        <item name="colorSurface">@color/swift_surface</item>
+        <item name="colorOnSurface">@color/swift_text_primary</item>
+        <item name="colorSurfaceVariant">@color/swift_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/swift_text_secondary</item>
+        <item name="colorOutline">@color/swift_outline</item>
+        <item name="colorOutlineVariant">@color/swift_outline_variant</item>
+        <item name="android:colorBackground">@color/swift_bg</item>
+
+        <!-- Component Defaults -->
+        <item name="materialCardViewStyle">@style/Widget.Swift.CardView</item>
+        <item name="materialButtonStyle">@style/Widget.Swift.Button</item>
     </style>
 </resources>

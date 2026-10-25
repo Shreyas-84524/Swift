@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Spacing Tokens -->
+    <dimen name="spacing_none">0dp</dimen>
+    <dimen name="spacing_2xs">2dp</dimen>
+    <dimen name="spacing_xs">4dp</dimen>
+    <dimen name="spacing_sm">8dp</dimen>
+    <dimen name="spacing_md">12dp</dimen>
+    <dimen name="spacing_lg">16dp</dimen>
+    <dimen name="spacing_xl">20dp</dimen>
+    <dimen name="spacing_2xl">24dp</dimen>
+    <dimen name="spacing_3xl">32dp</dimen>
+
+    <!-- Component Sizing & Touch Targets -->
+    <dimen name="min_touch_target">48dp</dimen>
+    <dimen name="button_min_height">48dp</dimen>
+    <dimen name="button_small_height">36dp</dimen>
+    <dimen name="app_header_logo_size">40dp</dimen>
+    <dimen name="icon_size_sm">16dp</dimen>
+    <dimen name="icon_size_md">20dp</dimen>
+    <dimen name="icon_size_lg">24dp</dimen>
+    <dimen name="status_dot_size">10dp</dimen>
+
+    <!-- Corner Radii -->
+    <dimen name="radius_xs">4dp</dimen>
+    <dimen name="radius_sm">8dp</dimen>
+    <dimen name="radius_md">12dp</dimen>
+    <dimen name="radius_lg">16dp</dimen>
+    <dimen name="radius_pill">999dp</dimen>
+
+    <!-- Card Styling -->
+    <dimen name="card_stroke_width">1dp</dimen>
+    <dimen name="card_elevation_flat">0dp</dimen>
+    <dimen name="card_elevation_subtle">1dp</dimen>
+    <dimen name="card_corner_radius">12dp</dimen>
+    <dimen name="card_padding_inner">16dp</dimen>
+    <dimen name="card_padding_compact">12dp</dimen>
+
+    <!-- Typography Text Sizes -->
+    <dimen name="text_size_caption">11sp</dimen>
+    <dimen name="text_size_body_sm">12sp</dimen>
+    <dimen name="text_size_body">14sp</dimen>
+    <dimen name="text_size_title_sm">15sp</dimen>
+    <dimen name="text_size_title">16sp</dimen>
+    <dimen name="text_size_title_lg">18sp</dimen>
+    <dimen name="text_size_headline">22sp</dimen>
+</resources>

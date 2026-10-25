@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base Neutral Colors -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Dark Theme Surface & Background Palette (Near-black, Calm) -->
+    <color name="swift_bg">#121417</color>
+    <color name="swift_surface">#1A1D21</color>
+    <color name="swift_surface_variant">#24282F</color>
+    <color name="swift_surface_container">#1E2227</color>
+    
+    <!-- Text Colors (High Contrast for Dark Theme) -->
+    <color name="swift_text_primary">#F1F3F5</color>
+    <color name="swift_text_secondary">#9DA5AE</color>
+    <color name="swift_text_tertiary">#767E87</color>
+    <color name="swift_text_disabled">#4E545C</color>
+
+    <!-- Outlines & Borders -->
+    <color name="swift_outline">#2C3138</color>
+    <color name="swift_outline_variant">#23272D</color>
+    <color name="swift_divider">#262A30</color>
+
+    <!-- Brand Accent Palette (Controlled Indigo for Dark Mode) -->
+    <color name="swift_brand_primary">#818CF8</color>
+    <color name="swift_brand_on_primary">#121417</color>
+    <color name="swift_brand_container">#2B2857</color>
+    <color name="swift_brand_on_container">#E0E7FF</color>
+
+    <!-- Semantic Status: Success -->
+    <color name="swift_status_success">#4ADE80</color>
+    <color name="swift_status_success_container">#12381F</color>
+    <color name="swift_status_on_success_container">#BBF7D0</color>
+
+    <!-- Semantic Status: Warning -->
+    <color name="swift_status_warning">#FBBF24</color>
+    <color name="swift_status_warning_container">#3E270A</color>
+    <color name="swift_status_on_warning_container">#FEF3C7</color>
+
+    <!-- Semantic Status: Error -->
+    <color name="swift_status_error">#F87171</color>
+    <color name="swift_status_error_container">#421818</color>
+    <color name="swift_status_on_error_container">#FEE2E2</color>
+
+    <!-- Semantic Status: Neutral / Inactive -->
+    <color name="swift_status_neutral">#94A3B8</color>
+    <color name="swift_status_neutral_container">#1E293B</color>
+    <color name="swift_status_on_neutral_container">#E2E8F0</color>
+</resources>

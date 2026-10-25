@@ -1,30 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:paddingHorizontal="@dimen/spacing_xl"
+    android:paddingVertical="@dimen/spacing_lg">
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="External Domain Configuration"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+        android:text="External Domain Configuration (Legacy)"
+        android:textAppearance="@style/TextAppearance.Swift.Headline"
+        android:textSize="@dimen/text_size_title"
+        android:layout_marginBottom="@dimen/spacing_md" />
 
-    <Switch
+    <com.google.android.material.materialswitch.MaterialSwitch
         android:id="@+id/enableExternalDomainSwitch"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Enable External Domain Access"
-        android:layout_marginBottom="16dp" />
+        android:textAppearance="@style/TextAppearance.Swift.Body"
+        android:layout_marginBottom="@dimen/spacing_md" />
 
     <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/domainInputLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:hint="Domain (e.g., sms.yourdomain.com)">
+        android:layout_marginBottom="@dimen/spacing_md"
+        android:hint="Domain (e.g., sms.yourdomain.com)"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/domainEditText"
@@ -39,19 +44,17 @@
         android:id="@+id/instructionsText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Instructions will appear here..."
-        android:textSize="12sp"
-        android:textColor="@android:color/darker_gray"
-        android:padding="8dp"
-        android:background="#F5F5F5"
-        android:layout_marginBottom="8dp" />
+        android:text="Set up a reverse proxy pointing to this device's local IP and port."
+        android:textAppearance="@style/TextAppearance.Swift.Caption"
+        android:padding="@dimen/spacing_sm"
+        android:background="@drawable/bg_status_pill"
+        android:layout_marginBottom="@dimen/spacing_sm" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="⚠️ Note: You need to set up a reverse proxy server to use external domain access. This allows your SMS Gateway to be accessible from anywhere on the internet."
-        android:textSize="11sp"
-        android:textColor="@android:color/holo_orange_dark"
-        android:padding="8dp" />
+        android:text="⚠️ Note: External domain access requires reverse proxy configuration."
+        android:textAppearance="@style/TextAppearance.Swift.Caption"
+        android:textColor="@color/swift_status_warning" />
 
 </LinearLayout>
