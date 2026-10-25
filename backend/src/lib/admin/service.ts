@@ -1,6 +1,6 @@
 import { db } from '../db/client';
 import { generateProjectKey, generateGatewayKey } from '../auth/keys';
-import { Project, Gateway, KeyEnvironment } from '@/types';
+import { Project, Gateway, KeyEnvironment, OutboxHealthResponse } from '@/types';
 
 export class AdminService {
   /**
@@ -245,5 +245,114 @@ export class AdminService {
       oldest_queued_at: oldestRes.rows.length > 0 ? oldestRes.rows[0].created_at : null,
     };
   }
-}
+  /**
+   * Retrieves aggregated health and queue statistics for push notifications and outbox.
+   * Zero sensitive data (tokens, keys, phone numbers, OTPs) included.
+   */
+  public static async getOutboxHealth(): Promise<OutboxHealthResponse['data']> {
+    const [countsRes, oldestDueRes, lastWakeRes, tokensRes, gatewaysRes, jobsRes] = await Promise.all([
+      db.query<{ status: string; count: string }>(
+        `SELECT status, COUNT(*) AS count
+         FROM notification_outbox
+         GROUP BY status`
+      ),
+      db.query<{ age_seconds: string }>(
+        `SELECT EXTRACT(EPOCH FROM (NOW() - next_attempt_at)) AS age_seconds
+         FROM notification_outbox
+         WHERE status IN ('PENDING', 'FAILED') AND next_attempt_at <= NOW()
+         ORDER BY next_attempt_at ASC
+         LIMIT 1`
+      ),
+      db.query<{ created_at: Date; status: string; response_code: string | null; age_seconds: string }>(
+        `SELECT created_at, status, response_code, EXTRACT(EPOCH FROM (NOW() - created_at)) AS age_seconds
+         FROM notification_outbox
+         WHERE status IN ('SENT', 'FAILED', 'DEAD_LETTER')
+         ORDER BY created_at DESC
+         LIMIT 1`
+      ),
+      db.query<{ active: string; invalid: string; gateways_with_active_token: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE is_valid = true) AS active,
+           COUNT(*) FILTER (WHERE is_valid = false) AS invalid,
+           COUNT(DISTINCT gateway_id) FILTER (WHERE is_valid = true) AS gateways_with_active_token
+         FROM gateway_push_tokens`
+      ),
+      db.query<{ total_active: string; online: string; most_recent_seen_at: Date | null }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE is_active = true) AS total_active,
+           COUNT(*) FILTER (
+             WHERE is_active = true
+               AND last_seen_at IS NOT NULL
+               AND last_seen_at > NOW() - INTERVAL '2 minutes'
+           ) AS online,
+           MAX(last_seen_at) AS most_recent_seen_at
+         FROM gateways`
+      ),
+      db.query<{ queued: string; claimed: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE status = 'QUEUED') AS queued,
+           COUNT(*) FILTER (WHERE status = 'CLAIMED') AS claimed
+         FROM sms_jobs`
+      ),
+    ]);
 
+    const outboxCounts = {
+      pending: 0,
+      processing: 0,
+      sent: 0,
+      failed: 0,
+      dead_letter: 0,
+    };
+    for (const row of countsRes.rows) {
+      const key = row.status.toLowerCase() as keyof typeof outboxCounts;
+      if (key in outboxCounts) {
+        outboxCounts[key] = parseInt(row.count, 10) || 0;
+      }
+    }
+
+    const oldestDueAge = oldestDueRes.rows.length > 0 && oldestDueRes.rows[0].age_seconds != null
+      ? Math.max(0, Math.floor(parseFloat(oldestDueRes.rows[0].age_seconds) || 0))
+      : null;
+
+    const lastWakeRow = lastWakeRes.rows[0];
+    const lastWake = lastWakeRow
+      ? {
+          timestamp: lastWakeRow.created_at ? new Date(lastWakeRow.created_at).toISOString() : null,
+          status: lastWakeRow.status,
+          response_code: lastWakeRow.response_code || null,
+          age_seconds: lastWakeRow.age_seconds != null
+            ? Math.max(0, Math.floor(parseFloat(lastWakeRow.age_seconds) || 0))
+            : null,
+        }
+      : null;
+
+    const tokensRow = tokensRes.rows[0];
+    const gatewaysRow = gatewaysRes.rows[0];
+    const jobsRow = jobsRes.rows[0];
+
+    return {
+      outbox: {
+        counts: outboxCounts,
+        oldest_due_age_seconds: oldestDueAge,
+        dead_letter_count: outboxCounts.dead_letter,
+        last_wake: lastWake,
+      },
+      tokens: {
+        active: parseInt(tokensRow?.active ?? '0', 10) || 0,
+        invalid: parseInt(tokensRow?.invalid ?? '0', 10) || 0,
+        gateways_with_active_token: parseInt(tokensRow?.gateways_with_active_token ?? '0', 10) || 0,
+      },
+      gateways: {
+        total_active: parseInt(gatewaysRow?.total_active ?? '0', 10) || 0,
+        online: parseInt(gatewaysRow?.online ?? '0', 10) || 0,
+        most_recent_seen_at: gatewaysRow?.most_recent_seen_at
+          ? new Date(gatewaysRow.most_recent_seen_at).toISOString()
+          : null,
+      },
+      sms_jobs: {
+        queued: parseInt(jobsRow?.queued ?? '0', 10) || 0,
+        claimed: parseInt(jobsRow?.claimed ?? '0', 10) || 0,
+      },
+    };
+  }
+}

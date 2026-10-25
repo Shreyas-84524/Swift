@@ -198,15 +198,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnSyncNow.setOnClickListener {
-            val worker = SmsGatewayService.instance?.getGlobalWorker()
-            if (worker != null) {
-                worker.syncNow()
-                Toast.makeText(this, "Manual sync triggered", Toast.LENGTH_SHORT).show()
-            } else {
-                lifecycleScope.launch {
+            btnSyncNow.isEnabled = false
+            lifecycleScope.launch {
+                try {
                     val summary = com.multi.encription.sms.engine.JobDrainEngine.getInstance(applicationContext)
                         .drainQueue(com.multi.encription.sms.engine.DrainSource.MANUAL_SYNC)
                     Toast.makeText(this@MainActivity, "Manual sync: ${summary.jobsDispatched} sent, ${summary.duplicatesSkipped} skipped", Toast.LENGTH_SHORT).show()
+                } finally {
+                    btnSyncNow.isEnabled = true
                 }
             }
         }

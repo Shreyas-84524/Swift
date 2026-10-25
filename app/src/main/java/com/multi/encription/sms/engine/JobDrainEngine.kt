@@ -55,9 +55,22 @@ class JobDrainEngine private constructor(private val appContext: Context) {
                 INSTANCE ?: JobDrainEngine(context.applicationContext).also { INSTANCE = it }
             }
         }
+
+        @androidx.annotation.VisibleForTesting
+        fun resetForTesting() {
+            synchronized(this) {
+                INSTANCE = null
+            }
+        }
     }
 
     suspend fun drainQueue(source: DrainSource): DrainSummary {
+        // Mode & enabled guard: only drain in GLOBAL_WORKER mode when enabled
+        if (configManager.gatewayMode != com.multi.encription.sms.models.GatewayMode.GLOBAL_WORKER || !configManager.isWorkerEnabled) {
+            Log.d(TAG, "[$source] Skipping drain: gateway is disabled or in LOCAL_API mode")
+            return DrainSummary(0, 0, 0, emptyQueueReached = false, hitSafetyBound = false, retryRecommended = false)
+        }
+
         // Enforce single-flight execution
         if (!drainMutex.tryLock()) {
             Log.d(TAG, "[$source] Drain already in progress. Setting pendingWorkSignal = true.")

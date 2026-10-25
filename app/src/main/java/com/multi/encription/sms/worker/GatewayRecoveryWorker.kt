@@ -14,6 +14,7 @@ import com.multi.encription.sms.engine.JobDrainEngine
 import com.multi.encription.sms.models.GatewayMode
 import com.multi.encription.sms.network.GatewayHeartbeatRequest
 import com.multi.encription.sms.network.GlobalGatewayApiClient
+import com.multi.encription.sms.push.FcmTokenCoordinator
 import com.multi.encription.sms.utils.ConfigManager
 import java.util.concurrent.TimeUnit
 
@@ -66,6 +67,14 @@ class GatewayRecoveryWorker(
         if (!configManager.secureStorage.hasGatewayKey()) {
             Log.w(TAG, "Skipping periodic recovery: no Gateway API key configured")
             return Result.success()
+        }
+
+        // Resumes push token registration if a token was received before network connection or across process death
+        try {
+            val tokenCoordinator = FcmTokenCoordinator.getInstance(applicationContext)
+            tokenCoordinator.syncToken()
+        } catch (e: Exception) {
+            Log.w(TAG, "Non-critical: Token sync during recovery sweep failed: ${e.message}")
         }
 
         Log.i(TAG, "Executing 15-minute periodic queue recovery sweep...")

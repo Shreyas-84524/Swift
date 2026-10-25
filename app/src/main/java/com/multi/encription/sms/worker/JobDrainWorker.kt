@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -19,6 +20,7 @@ import androidx.work.WorkerParameters
 import com.multi.encription.sms.R
 import com.multi.encription.sms.engine.DrainSource
 import com.multi.encription.sms.engine.JobDrainEngine
+import java.util.concurrent.TimeUnit
 
 class JobDrainWorker(
     appContext: Context,
@@ -30,6 +32,10 @@ class JobDrainWorker(
         private const val TAG = "JobDrainWorker"
         private const val NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "swift_job_drain_channel"
+        const val MAX_EXECUTION_ATTEMPTS = 3
+
+        fun hasRetryAttemptsRemaining(runAttemptCount: Int): Boolean =
+            runAttemptCount < MAX_EXECUTION_ATTEMPTS - 1
 
         fun enqueueExpedited(context: Context) {
             val constraints = Constraints.Builder()
@@ -39,6 +45,11 @@ class JobDrainWorker(
             val workRequest = OneTimeWorkRequestBuilder<JobDrainWorker>()
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setConstraints(constraints)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    10,
+                    TimeUnit.SECONDS
+                )
                 .addTag("fcm_push_wake")
                 .build()
 
@@ -57,7 +68,16 @@ class JobDrainWorker(
         val summary = engine.drainQueue(DrainSource.FCM_PUSH)
 
         Log.i(TAG, "JobDrainWorker finished: Dispatched=${summary.jobsDispatched}, Claimed=${summary.jobsClaimed}, Duplicates=${summary.duplicatesSkipped}")
-        return if (summary.retryRecommended) Result.retry() else Result.success()
+
+        if (summary.retryRecommended) {
+            if (!hasRetryAttemptsRemaining(runAttemptCount)) {
+                Log.w(TAG, "JobDrainWorker reached $MAX_EXECUTION_ATTEMPTS executions; yielding to 15m periodic recovery")
+                return Result.failure()
+            }
+            return Result.retry()
+        }
+
+        return Result.success()
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {

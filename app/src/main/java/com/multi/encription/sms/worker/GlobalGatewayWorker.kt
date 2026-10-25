@@ -6,19 +6,16 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
+import com.multi.encription.sms.BuildConfig
 import com.multi.encription.sms.engine.DrainSource
 import com.multi.encription.sms.engine.JobDrainEngine
 import com.multi.encription.sms.network.GatewayHeartbeatRequest
 import com.multi.encription.sms.network.GlobalGatewayApiClient
 import com.multi.encription.sms.utils.ConfigManager
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -45,8 +42,9 @@ enum class BackendConnectionStatus {
 
 /**
  * Event-Driven Global Gateway Worker.
- * Handles app-start reconciliation, manual synchronization requests, and periodic health heartbeats.
- * Continuous polling has been removed in favor of high-priority FCM wake-up events.
+ * Handles app-start reconciliation and manual synchronization requests.
+ * Continuous 60s background polling and repetitive heartbeats have been eliminated to save battery
+ * and cellular radio sleep cycles. Health heartbeats occur on start, manual sync, and during 15m periodic recovery.
  */
 class GlobalGatewayWorker(
     private val context: Context,
@@ -57,20 +55,17 @@ class GlobalGatewayWorker(
     private val apiClient = GlobalGatewayApiClient(configManager)
     private val drainEngine = JobDrainEngine.getInstance(context)
 
-    private var heartbeatJob: Job? = null
-
     private val _uiState = MutableStateFlow(WorkerUiState())
     val uiState: StateFlow<WorkerUiState> = _uiState.asStateFlow()
 
     companion object {
         private const val TAG = "GlobalGatewayWorker"
-        private const val HEARTBEAT_INTERVAL_MS = 60_000L
     }
 
     /**
      * Starts the gateway worker in event-driven mode.
-     * Executes a one-time reconciliation drain for any pending jobs queued while the device was sleeping/offline,
-     * and initializes the background heartbeat loop. Continuous short-interval polling is disabled.
+     * Executes an initial health heartbeat and one-time reconciliation drain for any pending jobs
+     * queued while the device was sleeping/offline.
      */
     fun start() {
         if (_uiState.value.isRunning) {
@@ -85,22 +80,22 @@ class GlobalGatewayWorker(
             simStatus = getSimStatusString()
         )
 
-        // Perform one-time app start reconciliation
+        // Send an initial heartbeat and perform one-time app start reconciliation
         scope.launch {
+            try {
+                sendHeartbeatInternal()
+            } catch (e: Exception) {
+                Log.w(TAG, "Non-critical: Initial start heartbeat failed: ${e.message}")
+            }
             drainQueuedJobs(DrainSource.APP_START_RECONCILIATION)
         }
-
-        startHeartbeatLoop()
     }
 
     /**
-     * Stops worker and heartbeat coroutines.
+     * Stops worker.
      */
     fun stop() {
         Log.i(TAG, "Stopping Global Gateway Worker...")
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-
         _uiState.value = _uiState.value.copy(
             isRunning = false,
             statusMessage = "Worker stopped"
@@ -113,6 +108,11 @@ class GlobalGatewayWorker(
     fun syncNow() {
         scope.launch {
             Log.d(TAG, "Manual Sync requested")
+            try {
+                sendHeartbeatInternal()
+            } catch (e: Exception) {
+                Log.w(TAG, "Non-critical: Manual sync heartbeat failed: ${e.message}")
+            }
             drainQueuedJobs(DrainSource.MANUAL_SYNC)
         }
     }
@@ -151,21 +151,6 @@ class GlobalGatewayWorker(
         return summary.jobsDispatched
     }
 
-    private fun startHeartbeatLoop() {
-        heartbeatJob = scope.launch {
-            while (isActive) {
-                try {
-                    sendHeartbeatInternal()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error during heartbeat: ${e.message}")
-                }
-                delay(HEARTBEAT_INTERVAL_MS)
-            }
-        }
-    }
-
     private suspend fun sendHeartbeatInternal() {
         if (!configManager.secureStorage.hasGatewayKey()) return
 
@@ -175,7 +160,7 @@ class GlobalGatewayWorker(
         val heartbeat = GatewayHeartbeatRequest(
             model = "${Build.MANUFACTURER} ${Build.MODEL}",
             androidSdk = Build.VERSION.SDK_INT,
-            appVersion = "1.0",
+            appVersion = BuildConfig.VERSION_NAME,
             simStatus = simStatus,
             batteryPct = batteryPct,
             workerEnabled = configManager.isWorkerEnabled
