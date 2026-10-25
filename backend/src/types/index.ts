@@ -258,8 +258,31 @@ export interface NotificationOutboxItem {
   next_attempt_at: Date;
   response_code?: string | null;
   error_message?: string | null;
+  deduplication_key?: string | null;
   created_at: Date;
   sent_at?: Date | null;
+}
+
+export interface RegisterPushTokenRequest {
+  token: string;
+  provider: 'FCM';
+  platform: 'ANDROID';
+  device_fingerprint?: string;
+  app_version?: string;
+}
+
+export interface RegisterPushTokenResponse {
+  success: boolean;
+  data: {
+    registered: boolean;
+    provider: 'FCM';
+    platform: 'ANDROID';
+    last_registered_at: string;
+  };
+}
+
+export interface PushWakePayload {
+  type: 'JOBS_AVAILABLE';
 }
 
 export interface CreateTemplateRequest {
