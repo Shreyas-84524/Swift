@@ -260,4 +260,38 @@ For real-time SMS wake signals (Phase 2), configure Firebase Admin credentials i
    FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
    ```
    *Note: Escaped newlines (`\n`) in `FIREBASE_PRIVATE_KEY` are automatically resolved at runtime.*
-4. **Fallback Polling**: If Firebase credentials are not set, Swift records a sanitized outbox failure and leaves all SMS jobs queued in PostgreSQL, where Android gateways retrieve them via regular polling fallback.
+4. **Fallback Handling**: If Firebase credentials are not set on the backend, Swift records a sanitized outbox failure and leaves all SMS jobs safely queued in PostgreSQL, where Android gateways retrieve them via WorkManager 15-minute recovery or manual "Sync Now".
+
+### Android Gateway Firebase Client Setup (Human Operator Step)
+
+To enable live FCM push wake-up on Android devices (Phase 3):
+
+1. **Add Android App in Firebase Console:**
+   - In your Firebase Console, click **Add app** > **Android**.
+   - Android package name: `com.multi.encription.sms` (must match application ID exactly).
+   - App nickname (optional): `Swift Gateway Android`.
+   - Debug signing certificate SHA-1 (optional for basic FCM data messaging).
+2. **Download Configuration File:**
+   - Download the generated `google-services.json`.
+3. **Place in Project:**
+   - Copy `google-services.json` into the `app/` directory:
+     ```text
+     SMS-Gateway-Free/
+       app/
+         google-services.json  <-- Place file here
+         build.gradle.kts
+         src/
+     ```
+   - **Security Note:** `app/google-services.json` is listed in `.gitignore`. **NEVER** commit this file or service account credentials to version control.
+4. **Build Flexibility (Offline / CI-Friendly):**
+   - The Gradle build configuration automatically detects whether `app/google-services.json` is present. If missing, `processDebugGoogleServices` is skipped safely, allowing compilation, static analysis, and unit test suites to pass in clean CI/development environments without dummy credentials.
+5. **Verify Live Push Wakeup on Device:**
+   - Launch the app with Gateway Key configured in **GLOBAL_WORKER** mode.
+   - The app retrieves its FCM registration token and registers it via `PUT /api/v1/gateway/push-token`.
+   - When an OTP is initiated from any project, the backend writes to `notification_outbox` and sends an FCM push (`data.type = "JOBS_AVAILABLE"`).
+   - Logcat verification:
+     ```text
+     GatewayFirebaseMessaging: Received push message (data payload: {type=JOBS_AVAILABLE})
+     JobDrainEngine: Draining queue triggered by FCM_PUSH
+     GlobalGatewayWorker: SMS job claimed and dispatched successfully
+     ```

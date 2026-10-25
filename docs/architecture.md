@@ -10,7 +10,7 @@ In the original implementation, external applications had to reach the Android d
 - **Security risks** associated with exposing Android local HTTP servers to public ingress.
 - **Single application binding** without multi-tenant authentication, key lifecycle, or rate controls.
 
-The new architecture decouples client applications from the physical Android device by introducing a **Global Cloud Backend** hosted on Vercel with PostgreSQL persistence. The Android device acts strictly as an **Outbound Gateway Worker**, polling for queued SMS jobs and dispatching them via its cellular SIM card.
+The architecture decouples client applications from the physical Android device through a **Global Cloud Backend** hosted on Vercel with PostgreSQL persistence. The Android device acts as an **Outbound Gateway Worker**: FCM wakes it when work is available, after which it atomically claims queued jobs and dispatches them through its cellular SIM.
 
 ---
 
@@ -39,12 +39,13 @@ The new architecture decouples client applications from the physical Android dev
 │  │                  SMS Job Queue Engine                 │  │
 │  │  - Atomic Job Leasing (CLAIMED with expiration lease) │  │
 │  │  - Status Tracking (QUEUED, CLAIMED, SENT, DELIVERED) │  │
+│  │  - Notification Outbox & High-Priority FCM Wake-Up    │  │
 │  │  - Stale lease recovery & Dead-letter handling        │  │
 │  └───────────────────────────────────────────────────────┘  │
 └──────────────┬──────────────────────────────▲───────────────┘
                │                              │
-               │ PostgreSQL Queries           │ Outbound Long-Polling /
-               │ (Supabase / Neon)            │ HTTPS Fetch & Status Push
+               │ PostgreSQL Queries           │ FCM Wakeup Trigger +
+               │ (Supabase / Neon)            │ HTTPS Outbound Claim & Status
                ▼                              │
 ┌──────────────────────────────┐              │
 │       PostgreSQL DB          │              │
@@ -52,6 +53,8 @@ The new architecture decouples client applications from the physical Android dev
 │ - project_api_keys           │              │
 │ - otp_challenges             │              │
 │ - sms_jobs                   │              │
+│ - notification_outbox        │              │
+│ - gateway_push_tokens        │              │
 │ - gateways                   │              │
 │ - gateway_api_keys           │              │
 └──────────────────────────────┘              │
@@ -61,9 +64,15 @@ The new architecture decouples client applications from the physical Android dev
                       │  (Header: X-Gateway-Key otp_gw_live_*)│
                       │                                       │
                       │  ┌─────────────────────────────────┐  │
-                      │  │ Polling Engine / Job Consumer   │  │
-                      │  │ - Exponential backoff + jitter  │  │
-                      │  │ - Foreground Service (dataSync) │  │
+                      │  │ Firebase Messaging Receiver     │  │
+                      │  │ - data.type: "JOBS_AVAILABLE"   │  │
+                      │  │ - Instant background wake-up    │  │
+                      │  └────────────────┬────────────────┘  │
+                      │                   │                   │
+                      │  ┌────────────────▼────────────────┐  │
+                      │  │ JobDrainEngine (Single-Flight)  │  │
+                      │  │ - Mutex lock + In-Flight set    │  │
+                      │  │ - WorkManager 15m safety net    │  │
                       │  └────────────────┬────────────────┘  │
                       │                   │                   │
                       │  ┌────────────────▼────────────────┐  │
@@ -113,33 +122,37 @@ The new architecture decouples client applications from the physical Android dev
 ### 3.3 Android Gateway Worker
 - **Role:** Physical SMS transmitter running on dedicated or repurposed Android hardware.
 - **Authentication:** Authenticates to the Global Backend using a gateway-specific key (`otp_gw_live_...`).
-- **Communication:** **100% Outbound HTTPS**. No inbound ports opened, no local web server exposed to WAN, no public IP or DDNS needed. Works equally well on Wi-Fi, 4G, or 5G mobile data.
-- **Android 15 (API 35) Execution Model:**
-  - Operates as a user-started `dataSync` Foreground Service with adaptive polling coroutines for development and testing.
-  - Adheres to Android 15's cumulative 6-hour background limit with graceful `Service.onTimeout()` shutdown to prevent OS crash exceptions.
-  - Does NOT assume 24/7 unattended background execution on Android 15 in polling mode.
-- **Long-Term Production Architecture (Push-Triggered):**
-  - Planned transition to high-priority push triggers (FCM): Backend enqueues SMS job $\to$ sends push wake signal $\to$ Android wakes $\to$ fetches job $\to$ sends SMS $\to$ reports status.
+- **Communication:** **100% Outbound HTTPS** with **Inbound High-Priority FCM Push Wake-up**. No inbound ports opened, no local web server exposed to WAN, no public IP or DDNS needed. Works on Wi-Fi, 4G, or 5G mobile data.
+- **Event-Driven Execution Model (Phase 3):**
+  - **Zero Polling Loop:** The continuous 3–60s polling loop is completely eliminated.
+  - **FCM Wake-Up:** High-priority FCM `JOBS_AVAILABLE` data messages wake `GatewayFirebaseMessagingService` when jobs arrive.
+  - **WorkManager Host:** Dispatches `JobDrainWorker` (expedited) to claim and transmit jobs via `JobDrainEngine`.
+  - **Durable Safety Net:** A 15-minute periodic `GatewayRecoveryWorker` runs as a safety net reconciliation job.
+  - **Foreground Service:** Runs for active connection status, UI display, and 60-second telemetry heartbeats. Adheres cleanly to Android 15's cumulative 6-hour background limit with graceful `Service.onTimeout()` shutdown.
 - **Responsibilities:**
-  1. Poll `GET /api/v1/gateway/jobs` when worker toggle is **ON**.
-  2. Acquire job claim leases from backend.
-  3. Dispatch SMS through Android `SmsManager` (supporting single-part and multipart SMS).
-  4. Capture broadcast intents for transmission success (`SMS_SENT`) and carrier delivery (`SMS_DELIVERED`).
-  5. Immediately report delivery status via `POST /api/v1/gateway/jobs/{jobId}/status`.
-  6. Completely halt all network requests and background loops when worker toggle is **OFF** or when `onTimeout` triggers.
+  1. Register and sync FCM push tokens via `PUT /api/v1/gateway/push-token` using `FcmTokenCoordinator`.
+  2. Handle `JOBS_AVAILABLE` FCM push wake signals immediately.
+  3. Acquire job claim leases from backend via `POST /api/v1/gateway/jobs`.
+  4. Dispatch SMS through Android `SmsManager` (supporting single-part and multipart SMS).
+  5. Capture broadcast intents for transmission success (`SMS_SENT`) and carrier delivery (`SMS_DELIVERED`).
+  6. Immediately report delivery status via `POST /api/v1/gateway/jobs/{jobId}/status`.
+  7. Provide manual "Sync Now" button and 15-minute background recovery.
 
 ---
 
 ## 4. Architectural Comparison: Legacy vs. Global
 
-| Feature | Legacy Local Gateway | Swift |
+| Feature | Legacy Local Gateway | Swift (Phase 3) |
 | :--- | :--- | :--- |
-| **Network Direction** | Inbound HTTP to phone (Port 8080) | Outbound HTTPS polling from phone to cloud |
+| **Network Direction** | Inbound HTTP to phone (Port 8080) | Outbound HTTPS + High-Priority FCM Wakeup |
+| **Delivery Trigger** | Direct inbound HTTP POST | Event-driven FCM `JOBS_AVAILABLE` push wake |
+| **Idle Battery Drain** | High (server listening) | Optimal (zero network/CPU polling when idle) |
 | **Network Dependency** | Same Wi-Fi or Cloudflare Tunnel | Any internet connection (Wi-Fi or Mobile Data) |
 | **Laptop Requirement** | Yes (must run `cloudflared` tunnel) | No (Vercel cloud backend runs 24/7) |
 | **Multi-Tenancy** | Single API key in app settings | Multi-project isolation with unique keys & quotas |
 | **OTP Security** | Client generated plaintext messages | Backend generates, hashes, and validates OTP |
 | **Job Concurrency** | Single device, sequential queue | Multi-worker capable with atomic job leasing |
+| **Queue Resilience** | In-memory / local device | PostgreSQL durable queue + 15m WorkManager recovery |
 | **Carrier Delivery** | Local Room DB only | Synced to Global DB with full status lifecycle |
 | **Attack Surface** | Exposed mobile HTTP server | Cloud API with strict rate limiting & WAF |
 
@@ -195,14 +208,14 @@ Client Project
 
 - **Strict Invariant:** External network calls (FCM) are **NEVER** made inside a database transaction.
 - **Durable First:** The OTP challenge and SMS job are committed to PostgreSQL before attempting FCM delivery.
-- **Fail-Safe Delivery:** If FCM delivery fails (network timeout, rate limit, missing credentials, invalid token), the SMS job is **never** rolled back or lost; it remains safely in `QUEUED` status to be claimed by the gateway's periodic polling loop.
+- **Fail-Safe Delivery:** If FCM delivery fails (network timeout, rate limit, missing credentials, invalid token), the SMS job is **never** rolled back or lost; it remains safely in `QUEUED` status for the 15-minute WorkManager reconciliation or manual sync.
 
 ### 7.2 Deterministic Gateway Selection Rule
 
 Swift maintains a single-owner architecture. Gateway selection for push delivery follows this deterministic rule:
 1. Query active, enabled gateways (`is_active = TRUE AND worker_enabled = TRUE`) with active, valid push tokens (`provider = 'FCM'`, `platform = 'ANDROID'`, `is_valid = TRUE`).
 2. **Exactly 1 Match (`SELECTED`):** The gateway and token are selected. Outbox item is created as `PENDING`, and immediate post-commit push is attempted.
-3. **0 Matches (`NO_VALID_GATEWAY_TOKEN`):** No push is attempted. Outbox item is recorded as `FAILED` with sanitized code `NO_VALID_GATEWAY_TOKEN`. The durable SMS job remains queued for polling fallback.
+3. **0 Matches (`NO_VALID_GATEWAY_TOKEN`):** No push is attempted. Outbox item is recorded as `FAILED` with sanitized code `NO_VALID_GATEWAY_TOKEN`. The durable SMS job remains queued for WorkManager reconciliation or manual sync.
 4. **> 1 Matches (`AMBIGUOUS_GATEWAY_SELECTION`):** Push wake is safely suppressed. Outbox item is recorded as `FAILED` with sanitized code `AMBIGUOUS_GATEWAY_SELECTION`. This prevents waking multiple physical devices simultaneously and causing duplicate carrier SMS dispatches. The queue falls back to atomic row leasing.
 
 ### 7.3 Transactional Outbox State Machine
