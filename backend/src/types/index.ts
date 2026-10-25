@@ -20,7 +20,6 @@ export interface ProjectConfig {
   template?: string;
   sms_template?: string;
 }
-
 export interface Project {
   id: string;
   name: string;
@@ -178,5 +177,140 @@ export interface HealthCheckResponse {
     queue_lag_seconds: number | null;
     queue_depth: number;
     active_gateways: number;
+  };
+}
+
+// ============================================================================
+// Phase 1: Message Templates & Push Notification Types
+// ============================================================================
+
+export type TemplateStatus = 'DRAFT' | 'APPROVED' | 'ACTIVE' | 'ARCHIVED';
+export type TemplateType = 'OTP' | 'TRANSACTIONAL' | 'MARKETING' | 'NOTIFICATION';
+export type SmsEncoding = 'GSM_7' | 'UCS2';
+
+export interface MessageTemplate {
+  id: string;
+  project_id: string;
+  name: string;
+  slug: string;
+  template_type: TemplateType;
+  description: string | null;
+  status: TemplateStatus;
+  active_version_id: string | null;
+  dlt_template_id?: string | null;
+  sender_header?: string | null;
+  pe_id?: string | null;
+  created_at: Date;
+  updated_at: Date;
+  active_version?: MessageTemplateVersion | null;
+}
+
+export interface MessageTemplateWithVersions extends MessageTemplate {
+  versions: MessageTemplateVersion[];
+  active_version: MessageTemplateVersion | null;
+  latest_version?: MessageTemplateVersion | null;
+}
+
+export interface MessageTemplateVersion {
+  id: string;
+  template_id: string;
+  version_number: number;
+  body: string;
+  variables: string[];
+  character_count: number;
+  segment_count: number;
+  encoding: SmsEncoding;
+  status: TemplateStatus;
+  dlt_template_id?: string | null;
+  sender_header?: string | null;
+  pe_id?: string | null;
+  created_by?: string | null;
+  approved_by?: string | null;
+  approved_at?: Date | null;
+  created_at: Date;
+  activated_at?: Date | null;
+}
+
+export interface GatewayPushToken {
+  id: string;
+  gateway_id: string;
+  token: string;
+  provider: 'FCM' | 'HMS' | 'APNS';
+  platform: 'ANDROID' | 'IOS' | 'WEB';
+  device_fingerprint?: string | null;
+  is_valid: boolean;
+  last_registered_at: Date;
+  last_used_at?: Date | null;
+  created_at: Date;
+}
+
+export interface NotificationOutboxItem {
+  id: string;
+  gateway_id?: string | null;
+  job_id?: string | null;
+  channel: 'FCM' | 'WEBHOOK' | 'SYSTEM';
+  priority: 'HIGH' | 'NORMAL';
+  payload: Record<string, unknown>;
+  status: 'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED' | 'DEAD_LETTER';
+  attempts: number;
+  max_attempts: number;
+  last_attempt_at?: Date | null;
+  next_attempt_at: Date;
+  response_code?: string | null;
+  error_message?: string | null;
+  created_at: Date;
+  sent_at?: Date | null;
+}
+
+export interface CreateTemplateRequest {
+  name: string;
+  slug: string;
+  template_type?: TemplateType;
+  description?: string;
+  body: string;
+  dlt_template_id?: string;
+  sender_header?: string;
+  pe_id?: string;
+  status?: TemplateStatus; // default DRAFT
+}
+
+export interface UpdateTemplateRequest {
+  name?: string;
+  description?: string;
+  body?: string; // if provided, creates new version
+  dlt_template_id?: string;
+  sender_header?: string;
+  pe_id?: string;
+  status?: TemplateStatus;
+}
+
+export interface ApproveTemplateRequest {
+  version_id?: string;
+}
+
+export interface ActivateTemplateRequest {
+  version_id?: string;
+}
+
+export interface PreviewTemplateRequest {
+  body: string;
+  sample_variables?: {
+    otp?: string;
+    app_name?: string;
+    expiry_minutes?: number | string;
+  };
+}
+
+export interface PreviewTemplateResponse {
+  success: boolean;
+  data: {
+    rendered_text: string;
+    variables: Record<string, string>;
+    encoding: SmsEncoding;
+    character_count: number;
+    raw_length: number;
+    segment_count: number;
+    max_characters_per_segment: number;
+    remaining_in_current_segment: number;
   };
 }

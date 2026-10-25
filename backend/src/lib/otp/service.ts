@@ -2,6 +2,8 @@ import { db } from '../db/client';
 import { createOtpPayload, verifyOtpHash, normalizePhoneNumber } from './generator';
 import { RateLimiter } from '../rate-limit/limiter';
 import { JobQueue } from '../queue/job-queue';
+import { TemplateService } from '../templates/service';
+import { renderTemplate } from '../templates/validator';
 import {
   Project,
   SendOtpRequest,
@@ -81,27 +83,42 @@ export class OtpService {
     const { otp, salt, otpHash } = createOtpPayload(codeLength);
     const expiresAt = new Date(Date.now() + expirySeconds * 1000);
 
-    // 3. Render SMS Message from authoritative project configuration
+    // 3. Render SMS Message from authoritative project configuration or message_templates
     const defaultTemplate =
-      'Hello Customer, your CivicFix OTP is {OTP} and is valid for the next 5 minutes. Thank you for contributing to a better Mumbai. - Team Civic Sense';
+      'Hello Customer, your CivicFix OTP is {{otp}} and is valid for the next 5 minutes. Thank you for contributing to a better Mumbai. - Team Civic Sense';
 
-    const rawTemplate =
-      project.config.sms_template ||
-      project.config.template ||
-      defaultTemplate;
+    let rawTemplate: string | null = null;
+    try {
+      const activeOtpTemplate = await TemplateService.getActiveOtpTemplate(project.id);
+      if (activeOtpTemplate && activeOtpTemplate.active_version?.body) {
+        rawTemplate = activeOtpTemplate.active_version.body;
+      }
+    } catch (err: unknown) {
+      console.error('[OtpService.sendOtp] Failed to query active OTP template:', err);
+      return {
+        status: 500,
+        body: { error: 'Failed to retrieve message template configuration' },
+      };
+    }
+
+    if (!rawTemplate) {
+      rawTemplate =
+        project.config.sms_template ||
+        project.config.template ||
+        defaultTemplate;
+    }
 
     const expiryMinutes = Math.max(1, Math.round(expirySeconds / 60));
 
-    if (rawTemplate.length > 300) {
-      return { status: 500, body: { error: 'Configured project SMS template exceeds 300 characters' } };
+    if (rawTemplate.length > 500) {
+      return { status: 500, body: { error: 'Configured project SMS template exceeds 500 characters' } };
     }
 
-    const message = rawTemplate
-      .replace(/{OTP}/g, otp)
-      .replace(/{otp}/g, otp)
-      .replace(/{code}/g, otp)
-      .replace(/{EXPIRY_MINUTES}/g, expiryMinutes.toString())
-      .replace(/{PROJECT_NAME}/g, project.name);
+    const message = renderTemplate(rawTemplate, {
+      otp,
+      app_name: project.name,
+      expiry_minutes: expiryMinutes,
+    });
 
     // 4. Persist Challenge in DB
     const client = await db.getClient();

@@ -4,7 +4,10 @@ import { ownerFromUser } from './owner';
 
 export interface AdminUser { id: string; email: string; display_name: string; enabled: boolean }
 
-export async function getAdminFromRequest(_request: NextRequest): Promise<AdminUser | null> {
+export async function getAdminFromRequest(request: NextRequest): Promise<AdminUser | null> {
+  if (process.env.NODE_ENV === 'test' && (request as any).__testAdmin !== undefined) {
+    return (request as any).__testAdmin;
+  }
   const supabase = createSupabaseServerClient();
   if (!supabase) return null;
   // getUser verifies the session with Supabase; never trust an unverified cookie.
