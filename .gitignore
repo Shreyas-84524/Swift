@@ -16,3 +16,6 @@ backend/.env*
 backend/tsconfig.tsbuildinfo
 *.db
 sms_database
+.kotlin/
+app/google-services.json
+google-services.json

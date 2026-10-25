@@ -148,3 +148,68 @@ sealed class ApiResult<out T> {
     data class HttpError(val statusCode: Int, val message: String) : ApiResult<Nothing>()
     data class NetworkError(val exception: Throwable, val message: String) : ApiResult<Nothing>()
 }
+
+// ==========================================
+// Phase 3: Push Token Models
+// ==========================================
+
+data class RegisterPushTokenRequest(
+    @SerializedName("token")
+    val token: String,
+
+    @SerializedName("provider")
+    val provider: String = "FCM",
+
+    @SerializedName("platform")
+    val platform: String = "ANDROID",
+
+    @SerializedName("device_fingerprint")
+    val deviceFingerprint: String? = null,
+
+    @SerializedName("app_version")
+    val appVersion: String? = null
+)
+
+data class RegisterPushTokenResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("data")
+    val data: RegisterPushTokenData? = null,
+
+    @SerializedName("error")
+    val error: String? = null
+)
+
+data class RegisterPushTokenData(
+    @SerializedName("registered")
+    val registered: Boolean = false,
+
+    @SerializedName("provider")
+    val provider: String? = null,
+
+    @SerializedName("platform")
+    val platform: String? = null,
+
+    @SerializedName("last_registered_at")
+    val lastRegisteredAt: String? = null
+)
+
+data class UnregisterPushTokenResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("data")
+    val data: UnregisterPushTokenData? = null,
+
+    @SerializedName("error")
+    val error: String? = null
+)
+
+data class UnregisterPushTokenData(
+    @SerializedName("invalidated")
+    val invalidated: Boolean = false,
+
+    @SerializedName("count")
+    val count: Int = 0
+)

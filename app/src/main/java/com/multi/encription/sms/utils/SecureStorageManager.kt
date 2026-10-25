@@ -19,6 +19,7 @@ class SecureStorageManager(context: Context) {
         private const val SECURE_PREFS_FILE = "secure_gateway_credentials"
         private const val FALLBACK_PREFS_FILE = "fallback_gateway_credentials"
         private const val KEY_GATEWAY_API_KEY = "gateway_api_key"
+        private const val KEY_PENDING_FCM_TOKEN = "pending_fcm_token"
     }
 
     init {
@@ -46,7 +47,7 @@ class SecureStorageManager(context: Context) {
     fun saveGatewayKey(rawKey: String) {
         val cleanKey = rawKey.trim()
         prefs.edit().putString(KEY_GATEWAY_API_KEY, cleanKey).apply()
-        Log.d(TAG, "Gateway API key stored securely (prefix: ${getKeyPrefix(cleanKey)})")
+        Log.d(TAG, "Gateway API key stored securely")
     }
 
     /**
@@ -72,6 +73,18 @@ class SecureStorageManager(context: Context) {
         Log.d(TAG, "Gateway API key cleared")
     }
 
+    /** Stores a not-yet-registered FCM token alongside the gateway credential. */
+    fun savePendingFcmToken(token: String) {
+        prefs.edit().putString(KEY_PENDING_FCM_TOKEN, token).apply()
+    }
+
+    fun getPendingFcmToken(): String? =
+        prefs.getString(KEY_PENDING_FCM_TOKEN, null)?.takeIf { it.isNotBlank() }
+
+    fun clearPendingFcmToken() {
+        prefs.edit().remove(KEY_PENDING_FCM_TOKEN).apply()
+    }
+
     /**
      * Returns a safe masked version of the key suitable for UI display.
      * Format: otp_gw_test_0e15••••••••
@@ -85,7 +98,4 @@ class SecureStorageManager(context: Context) {
         }
     }
 
-    private fun getKeyPrefix(key: String): String {
-        return if (key.length >= 16) key.substring(0, 16) else "short_key"
-    }
 }

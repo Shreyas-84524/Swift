@@ -213,4 +213,98 @@ class GlobalGatewayApiClient(private val configManager: ConfigManager) {
             ApiResult.NetworkError(e, "Unexpected error: ${e.message}")
         }
     }
+
+    /**
+     * Registers or rotates the FCM push token for this gateway worker (PUT /api/v1/gateway/push-token).
+     */
+    suspend fun registerPushToken(request: RegisterPushTokenRequest): ApiResult<RegisterPushTokenData> = withContext(Dispatchers.IO) {
+        val gatewayKey = configManager.secureStorage.getGatewayKey()
+        if (gatewayKey.isNullOrBlank()) {
+            return@withContext ApiResult.AuthError(401, "Gateway API key is not configured on this device")
+        }
+
+        val baseUrl = configManager.globalBackendUrl
+        val url = "$baseUrl/api/v1/gateway/push-token"
+
+        val jsonBody = gson.toJson(request)
+        val httpRequest = Request.Builder()
+            .url(url)
+            .addHeader(HEADER_GATEWAY_KEY, gatewayKey)
+            .put(jsonBody.toRequestBody(jsonMediaType))
+            .build()
+
+        try {
+            httpClient.newCall(httpRequest).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
+                when {
+                    response.isSuccessful -> {
+                        val parsed = gson.fromJson(bodyStr, RegisterPushTokenResponse::class.java)
+                        ApiResult.Success(parsed.data ?: RegisterPushTokenData(registered = true))
+                    }
+                    response.code == 401 || response.code == 403 -> {
+                        Log.w(TAG, "Push token registration unauthorized (HTTP ${response.code})")
+                        ApiResult.AuthError(response.code, "Invalid or revoked Gateway API key")
+                    }
+                    response.code == 409 -> {
+                        Log.w(TAG, "Push token conflict: token registered to another gateway (HTTP 409)")
+                        ApiResult.HttpError(409, "Push token already registered to another gateway device")
+                    }
+                    else -> {
+                        Log.w(TAG, "Push token registration failed with HTTP ${response.code}")
+                        ApiResult.HttpError(response.code, "Registration failed (HTTP ${response.code})")
+                    }
+                }
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "Network error registering push token: ${e.message}")
+            ApiResult.NetworkError(e, "Network unavailable during push token registration: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error registering push token", e)
+            ApiResult.NetworkError(e, "Unexpected error: ${e.message}")
+        }
+    }
+
+    /**
+     * Invalidates active push tokens for this gateway (DELETE /api/v1/gateway/push-token).
+     * Token is never included in the URL to prevent server log leaks.
+     */
+    suspend fun unregisterPushToken(): ApiResult<UnregisterPushTokenData> = withContext(Dispatchers.IO) {
+        val gatewayKey = configManager.secureStorage.getGatewayKey()
+        if (gatewayKey.isNullOrBlank()) {
+            return@withContext ApiResult.AuthError(401, "Gateway API key is not configured on this device")
+        }
+
+        val baseUrl = configManager.globalBackendUrl
+        val url = "$baseUrl/api/v1/gateway/push-token"
+
+        val httpRequest = Request.Builder()
+            .url(url)
+            .addHeader(HEADER_GATEWAY_KEY, gatewayKey)
+            .delete()
+            .build()
+
+        try {
+            httpClient.newCall(httpRequest).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
+                when {
+                    response.isSuccessful -> {
+                        val parsed = gson.fromJson(bodyStr, UnregisterPushTokenResponse::class.java)
+                        ApiResult.Success(parsed.data ?: UnregisterPushTokenData(invalidated = true))
+                    }
+                    response.code == 401 || response.code == 403 -> {
+                        ApiResult.AuthError(response.code, "Invalid or revoked Gateway API key")
+                    }
+                    else -> {
+                        ApiResult.HttpError(response.code, "Token invalidation failed (HTTP ${response.code})")
+                    }
+                }
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "Network error invalidating push token: ${e.message}")
+            ApiResult.NetworkError(e, "Network error invalidating push token: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error invalidating push token", e)
+            ApiResult.NetworkError(e, "Unexpected error: ${e.message}")
+        }
+    }
 }
