@@ -1,9 +1,12 @@
+import { createHash } from 'crypto';
 import { db } from '../db/client';
 import { createOtpPayload, verifyOtpHash, normalizePhoneNumber } from './generator';
 import { RateLimiter } from '../rate-limit/limiter';
 import { JobQueue } from '../queue/job-queue';
 import { TemplateService } from '../templates/service';
 import { renderTemplate } from '../templates/validator';
+import { GatewaySelector } from '../push/gateway-selector';
+import { PushService } from '../push/push-service';
 import {
   Project,
   SendOtpRequest,
@@ -21,6 +24,11 @@ export class OtpService {
     project: Project,
     request: SendOtpRequest
   ): Promise<{ status: number; body: SendOtpResponse | { error: string; retry_after_seconds?: number } }> {
+    const idempotencyKey = request.idempotency_key?.trim() || null;
+    if (idempotencyKey && idempotencyKey.length > 128) {
+      return { status: 400, body: { error: 'Idempotency key cannot exceed 128 characters' } };
+    }
+
     let normalizedPhone: string;
     try {
       normalizedPhone = normalizePhoneNumber(request.phone);
@@ -30,12 +38,11 @@ export class OtpService {
     }
 
     // 0. Idempotency Check (if key provided)
-    if (request.idempotency_key && request.idempotency_key.trim().length > 0) {
-      const cleanKey = request.idempotency_key.trim();
+    if (idempotencyKey) {
       const existingRes = await db.query<OtpChallenge>(
         `SELECT * FROM otp_challenges
          WHERE project_id = $1 AND idempotency_key = $2 AND consumed = FALSE AND expires_at > NOW()`,
-        [project.id, cleanKey]
+        [project.id, idempotencyKey]
       );
 
       if (existingRes.rows.length > 0) {
@@ -120,8 +127,11 @@ export class OtpService {
       expiry_minutes: expiryMinutes,
     });
 
-    // 4. Persist Challenge in DB
+    // 4. Persist Challenge in DB along with SMS Job and Notification Outbox Wake
     const client = await db.getClient();
+    let outboxId: string | null = null;
+    let shouldDispatchPush = false;
+
     try {
       await client.query('BEGIN');
 
@@ -132,7 +142,6 @@ export class OtpService {
       `;
 
       const maxAttempts = project.config.max_attempts ?? 3;
-      const idempotencyKey = request.idempotency_key?.trim() || null;
       const challengeRes = await client.query<{ id: string }>(challengeInsert, [
         project.id,
         normalizedPhone,
@@ -147,15 +156,66 @@ export class OtpService {
       const challengeId = challengeRes.rows[0].id;
 
       // 5. Enqueue SMS Job
-      await client.query(
+      const jobRes = await client.query<{ id: string }>(
         `INSERT INTO sms_jobs (project_id, challenge_id, phone_number, message, status)
-         VALUES ($1, $2, $3, $4, 'QUEUED')`,
+         VALUES ($1, $2, $3, $4, 'QUEUED')
+         RETURNING id`,
         [project.id, challengeId, normalizedPhone, message]
       );
+      const jobId = jobRes.rows[0]?.id || challengeId;
+
+      // 6. Transactional Gateway Selection and Notification Outbox Item
+      // Evaluates single-owner gateway selection rule without committing or calling network
+      const selection = await GatewaySelector.selectGateway(client);
+      const dedupKey = idempotencyKey
+        ? `idempotency:${createHash('sha256').update(`${project.id}\0${idempotencyKey}`).digest('hex')}`
+        : `otp_challenge:${challengeId}`;
+      const payloadJson = JSON.stringify({ type: 'JOBS_AVAILABLE' });
+
+      if (selection.status === 'SELECTED') {
+        const outboxRes = await client.query<{ id: string }>(
+          `INSERT INTO notification_outbox (
+             gateway_id, job_id, channel, priority, payload, status,
+             attempts, max_attempts, next_attempt_at, deduplication_key
+           )
+           VALUES ($1, $2, 'FCM', 'HIGH', $3, 'PENDING', 0, 5, NOW(), $4)
+           RETURNING id`,
+          [selection.gateway.gatewayId, jobId, payloadJson, dedupKey]
+        );
+        outboxId = outboxRes.rows[0]?.id || null;
+        shouldDispatchPush = true;
+      } else {
+        // Preserves durable SMS job even when no valid push gateway exists or state is ambiguous
+        const outboxRes = await client.query<{ id: string }>(
+          `INSERT INTO notification_outbox (
+             gateway_id, job_id, channel, priority, payload, status,
+             attempts, max_attempts, next_attempt_at, response_code, error_message, deduplication_key
+           )
+           VALUES (NULL, $1, 'FCM', 'HIGH', $2, 'FAILED', 0, 5, NOW(), $3, $4, $5)
+           RETURNING id`,
+          [jobId, payloadJson, selection.reasonCode, selection.sanitizedReason, dedupKey]
+        );
+        outboxId = outboxRes.rows[0]?.id || null;
+        shouldDispatchPush = false;
+      }
 
       await client.query('COMMIT');
 
-      // Return challenge ID (never return OTP plaintext)
+      // 7. Post-commit immediate push dispatch attempt
+      // CRITICAL: Network call is strictly executed AFTER database transaction commits.
+      // An FCM network failure or invalid token must NEVER rollback the OTP challenge
+      // or delete/fail the durable SMS job.
+      if (shouldDispatchPush && outboxId) {
+        try {
+          await PushService.dispatchOutboxItem(outboxId);
+        } catch {
+          // Push/database errors can carry request parameters in their details.
+          // The durable outbox lease will be eligible for recovery after timeout.
+          console.error('[OtpService.sendOtp] Immediate push wake attempt failed post-commit');
+        }
+      }
+
+      // Return challenge ID (never return OTP plaintext or internal gateway state)
       return {
         status: 200,
         body: {
