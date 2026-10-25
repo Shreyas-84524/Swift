@@ -240,3 +240,24 @@ For issues and questions:
 2. Review the API documentation
 3. Check device logs for error messages
 4. Ensure all permissions are granted
+
+---
+
+## Push Wake Configuration (Firebase Cloud Messaging)
+
+For real-time SMS wake signals (Phase 2), configure Firebase Admin credentials in the backend environment:
+
+1. **Create Firebase Project**: Navigate to the [Firebase Console](https://console.firebase.google.com/) and create a project.
+2. **Generate Service Account**:
+   - Go to **Project Settings** > **Service accounts**.
+   - Select Node.js and click **Generate new private key**.
+   - Download the JSON credentials file securely (never commit this file to git).
+3. **Configure Environment Variables**:
+   In your Vercel deployment or local `.env.local`:
+   ```bash
+   FIREBASE_PROJECT_ID=your-project-id
+   FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com
+   FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
+   ```
+   *Note: Escaped newlines (`\n`) in `FIREBASE_PRIVATE_KEY` are automatically resolved at runtime.*
+4. **Fallback Polling**: If Firebase credentials are not set, Swift records a sanitized outbox failure and leaves all SMS jobs queued in PostgreSQL, where Android gateways retrieve them via regular polling fallback.

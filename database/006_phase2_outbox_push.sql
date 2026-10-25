@@ -8,7 +8,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
+        SELECT 1 FROM information_schema.columns
         WHERE table_name = 'notification_outbox' AND column_name = 'deduplication_key'
     ) THEN
         ALTER TABLE notification_outbox

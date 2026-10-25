@@ -172,3 +172,61 @@ Phase 1 introduces the backend foundations for editable message templates and ev
 - **Token Registry (`gateway_push_tokens`):** Stores FCM/HMS/APNS device tokens per gateway with platform and fingerprint metadata.
 - **Transactional Outbox (`notification_outbox`):** Implements the Transactional Outbox pattern so that when an SMS job is enqueued, a wake notification can be scheduled atomically with guaranteed delivery.
 - **Zero Disruption to Phase 1 Android Execution:** Polling on Android devices continues unchanged while backend tables, admin APIs, and validation systems are primed for push activation in Phase 2.
+
+---
+
+## 7. Phase 2: Transactional FCM Wake-Up Delivery
+
+Phase 2 activates high-priority Firebase Cloud Messaging (FCM HTTP v1) data wake signals to notify registered Android gateway devices when SMS jobs are enqueued, while keeping PostgreSQL as the sole durable source of truth.
+
+### 7.1 Architecture & Transaction Boundary
+
+```text
+Client Project
+  → POST /api/v1/otp/send
+  → Vercel validates project key & quotas
+  → BEGIN DB Transaction:
+      - INSERT otp_challenges
+      - INSERT sms_jobs (QUEUED)
+      - INSERT notification_outbox (PENDING / FAILED, dedup_key)
+  → COMMIT DB Transaction
+  → Post-Commit: PushService.dispatchOutboxItem (Immediate FCM HTTP v1 Wake)
+```
+
+- **Strict Invariant:** External network calls (FCM) are **NEVER** made inside a database transaction.
+- **Durable First:** The OTP challenge and SMS job are committed to PostgreSQL before attempting FCM delivery.
+- **Fail-Safe Delivery:** If FCM delivery fails (network timeout, rate limit, missing credentials, invalid token), the SMS job is **never** rolled back or lost; it remains safely in `QUEUED` status to be claimed by the gateway's periodic polling loop.
+
+### 7.2 Deterministic Gateway Selection Rule
+
+Swift maintains a single-owner architecture. Gateway selection for push delivery follows this deterministic rule:
+1. Query active, enabled gateways (`is_active = TRUE AND worker_enabled = TRUE`) with active, valid push tokens (`provider = 'FCM'`, `platform = 'ANDROID'`, `is_valid = TRUE`).
+2. **Exactly 1 Match (`SELECTED`):** The gateway and token are selected. Outbox item is created as `PENDING`, and immediate post-commit push is attempted.
+3. **0 Matches (`NO_VALID_GATEWAY_TOKEN`):** No push is attempted. Outbox item is recorded as `FAILED` with sanitized code `NO_VALID_GATEWAY_TOKEN`. The durable SMS job remains queued for polling fallback.
+4. **> 1 Matches (`AMBIGUOUS_GATEWAY_SELECTION`):** Push wake is safely suppressed. Outbox item is recorded as `FAILED` with sanitized code `AMBIGUOUS_GATEWAY_SELECTION`. This prevents waking multiple physical devices simultaneously and causing duplicate carrier SMS dispatches. The queue falls back to atomic row leasing.
+
+### 7.3 Transactional Outbox State Machine
+
+- **States:** `PENDING` → `PROCESSING` → `SENT` / `FAILED` / `DEAD_LETTER`.
+- **Atomic Claiming:** A due `PENDING`/`FAILED` record is atomically moved to `PROCESSING`; a `PROCESSING` record whose lease is older than five minutes can be reclaimed after a crashed invocation.
+- **Idempotency & Deduplication:** Enforced via `deduplication_key` and its unique index. Client idempotency keys are SHA-256-derived before use as outbox keys, keeping the database key bounded and avoiding storage of a second raw copy.
+- **Retry Backoff:** Retryable failures schedule bounded exponential backoff (`30s`, `60s`, `120s`, `240s`, then `480s`; maximum 15 minutes). When `attempts >= max_attempts` (default 5), status moves to `DEAD_LETTER`.
+- **Token Invalidation:** On `UNREGISTERED_TOKEN` (including HTTP 404, `messaging/registration-token-not-registered`), the gateway's token is immediately set to `is_valid = FALSE` in `gateway_push_tokens`.
+
+### 7.4 Minimal High-Priority FCM Wake Payload
+
+FCM messages are strictly wake-up triggers, never job carriers.
+- **Payload:**
+  ```json
+  {
+    "data": {
+      "type": "JOBS_AVAILABLE"
+    },
+    "android": {
+      "priority": "high",
+      "ttl": 60000,
+      "collapseKey": "swift_jobs_available"
+    }
+  }
+  ```
+- **Privacy & Security Guarantee:** The payload contains **ZERO** OTP codes, phone numbers, recipient metadata, SMS message text, or API credentials.

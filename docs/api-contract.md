@@ -411,3 +411,123 @@ All endpoints in this section require Admin authentication via Supabase JWT sess
 - **Method:** `GET` / `POST`
 - **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}/preview`
 - **Description:** Renders and calculates telecom metrics for an existing saved template using its active version body and optional variable overrides.
+
+---
+
+## 7. Gateway Push Token Endpoints (Phase 2)
+
+All endpoints in this section require Gateway authentication via the `X-Gateway-Key` header.
+Tokens and sensitive payload details are never exposed to clients or logged.
+
+### 7.1 Register or Rotate Gateway Push Token
+Registers or rotates the FCM device push token for the authenticated gateway worker. Invalidates any previously active FCM tokens registered to this gateway.
+
+- **Method:** `PUT`
+- **Path:** `/api/v1/gateway/push-token`
+- **Auth:** `X-Gateway-Key` required
+- **Content-Type:** `application/json`
+
+#### Request Body
+```json
+{
+  "token": "dK3j8...fcm_device_token...x9P",
+  "provider": "FCM",
+  "platform": "ANDROID",
+  "device_fingerprint": "a1b2c3d4e5f6",
+  "app_version": "2.1.0"
+}
+```
+
+- **Fields:**
+  - `token` (string, required): Firebase Cloud Messaging registration token (min 10, max 4096 chars).
+  - `provider` (string, required): Must be `"FCM"`.
+  - `platform` (string, required): Must be `"ANDROID"`.
+  - `device_fingerprint` (string, optional): Unique device hardware identifier (max 100 chars).
+  - `app_version` (string, optional): Android gateway app release version (max 20 chars).
+
+#### Responses
+- **`200 OK` (Registration / Rotation Succeeded):**
+```json
+{
+  "success": true,
+  "data": {
+    "registered": true,
+    "provider": "FCM",
+    "platform": "ANDROID",
+    "last_registered_at": "2026-10-25T14:00:00.000Z"
+  }
+}
+```
+*Note: The response never echoes the raw push token.*
+
+- **`400 Bad Request` (Validation Error or Malformed JSON):**
+```json
+{
+  "error": "Invalid JSON request body"
+}
+```
+*Or validation failures, e.g.:*
+```json
+{
+  "error": "Token is required and must be a string"
+}
+```
+
+- **`401 Unauthorized` (Missing or Invalid Gateway Key):**
+```json
+{
+  "error": "Missing X-Gateway-Key header"
+}
+```
+
+- **`409 Conflict` (Cross-Gateway Token Hijack Prevented):**
+Returned if the token is already registered and assigned to another distinct gateway device.
+```json
+{
+  "error": "Push token is already registered to another gateway device"
+}
+```
+
+- **`500 Internal Server Error` (Database or Server Failure):**
+```json
+{
+  "error": "Internal server error processing push token registration"
+}
+```
+
+---
+
+### 7.2 Invalidate Gateway Push Token(s)
+Invalidates push tokens for the authenticated gateway (e.g., on gateway logout, worker disablement, or token decommissioning).
+
+- **Method:** `DELETE`
+- **Path:** `/api/v1/gateway/push-token`
+- **Auth:** `X-Gateway-Key` required
+
+All active tokens belonging to the authenticated gateway are invalidated. The raw token is intentionally never accepted in the URL, where access logs could expose it.
+
+#### Responses
+- **`200 OK` (Invalidation Succeeded):**
+```json
+{
+  "success": true,
+  "data": {
+    "invalidated": true,
+    "count": 1
+  }
+}
+```
+
+- **`401 Unauthorized` (Missing or Invalid Gateway Key):**
+```json
+{
+  "error": "Invalid gateway key"
+}
+```
+
+- **`500 Internal Server Error`:**
+```json
+{
+  "error": "Internal server error invalidating push token"
+}
+```

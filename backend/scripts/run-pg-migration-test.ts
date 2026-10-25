@@ -20,6 +20,7 @@ async function main() {
   const schemaPath = path.join(rootDir, 'database', 'schema.sql');
   const migration004Path = path.join(rootDir, 'database', '004_phase1_templates_and_push.sql');
   const migration005Path = path.join(rootDir, 'database', '005_phase1_corrections.sql');
+  const migration006Path = path.join(rootDir, 'database', '006_phase2_outbox_push.sql');
   const testScriptPath = path.join(rootDir, 'database', 'test_phase1_invariants.sql');
 
   // Provide uuid_generate_v4 fallback alias if uuid-ossp extension is missing
@@ -92,6 +93,80 @@ async function main() {
   // Remove the pre-migration fixture before the transactional suite so its
   // final zero-record assertion remains meaningful.
   await db.query(`DELETE FROM projects WHERE id = $1`, [legacyProjectId]);
+
+  // Step 3b: Migration 006 (Phase 2 Outbox Deduplication)
+  if (fs.existsSync(migration006Path)) {
+    console.log('Applying Migration 006 (database/006_phase2_outbox_push.sql)...');
+    const migration006Sql = sanitizeForPglite(fs.readFileSync(migration006Path, 'utf-8'));
+    await db.exec(migration006Sql);
+    console.log('  ✅ Migration 006 applied successfully.\n');
+
+    // Step 3c: Verify Migration 006 Invariants
+    console.log('Verifying Migration 006 Invariants (deduplication & single outbox per job)...');
+
+    // 1. Verify deduplication_key uniqueness
+    await db.query(
+      `INSERT INTO notification_outbox (channel, priority, payload, status, deduplication_key)
+       VALUES ('FCM', 'HIGH', '{"type":"JOBS_AVAILABLE"}'::jsonb, 'PENDING', 'test_dedup_key_pglite_1')`
+    );
+
+    let dedupViolationCaught = false;
+    try {
+      await db.query(
+        `INSERT INTO notification_outbox (channel, priority, payload, status, deduplication_key)
+         VALUES ('FCM', 'HIGH', '{"type":"JOBS_AVAILABLE"}'::jsonb, 'PENDING', 'test_dedup_key_pglite_1')`
+      );
+    } catch (err: any) {
+      if (err.message.includes('idx_notification_outbox_dedup')) {
+        dedupViolationCaught = true;
+      }
+    }
+    if (!dedupViolationCaught) {
+      throw new Error('Migration 006 failed: duplicate deduplication_key was not rejected by PostgreSQL');
+    }
+    console.log('  ✅ Invariant Verified: duplicate deduplication_key is rejected (idx_notification_outbox_dedup)');
+
+    // 2. Verify job_id + channel uniqueness
+    const tempProjId = '00000000-0000-4000-8000-000000000201';
+    const tempJobId = '00000000-0000-4000-8000-000000000202';
+    await db.query(
+      `INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)`,
+      [tempProjId, 'Temp Outbox Test Proj', 'temp-outbox-test-proj']
+    );
+    await db.query(
+      `INSERT INTO sms_jobs (id, project_id, phone_number, message, status)
+       VALUES ($1, $2, '+919999999999', 'Temp Test Msg', 'QUEUED')`,
+      [tempJobId, tempProjId]
+    );
+    await db.query(
+      `INSERT INTO notification_outbox (job_id, channel, priority, payload, status, deduplication_key)
+       VALUES ($1, 'FCM', 'HIGH', '{"type":"JOBS_AVAILABLE"}'::jsonb, 'PENDING', 'test_dedup_key_pglite_2')`,
+      [tempJobId]
+    );
+
+    let jobChannelViolationCaught = false;
+    try {
+      await db.query(
+        `INSERT INTO notification_outbox (job_id, channel, priority, payload, status, deduplication_key)
+         VALUES ($1, 'FCM', 'HIGH', '{"type":"JOBS_AVAILABLE"}'::jsonb, 'PENDING', 'test_dedup_key_pglite_3')`,
+        [tempJobId]
+      );
+    } catch (err: any) {
+      if (err.message.includes('idx_notification_outbox_job_channel')) {
+        jobChannelViolationCaught = true;
+      }
+    }
+    if (!jobChannelViolationCaught) {
+      throw new Error('Migration 006 failed: duplicate (job_id, channel) was not rejected by PostgreSQL');
+    }
+    console.log('  ✅ Invariant Verified: duplicate (job_id, channel) is rejected (idx_notification_outbox_job_channel)');
+
+    // Clean up temporary invariant test data
+    await db.query(`DELETE FROM notification_outbox WHERE deduplication_key LIKE 'test_dedup_key_pglite_%'`);
+    await db.query(`DELETE FROM sms_jobs WHERE id = $1`, [tempJobId]);
+    await db.query(`DELETE FROM projects WHERE id = $1`, [tempProjId]);
+    console.log('  ✅ Migration 006 invariant test data cleaned up.\n');
+  }
 
   // Step 4: Execute Invariant Verification Suite
   console.log('Executing Invariant Verification Suite (database/test_phase1_invariants.sql)...');

@@ -60,8 +60,11 @@ Connect this repository to Vercel and set its Root Directory to `backend`. For C
 | `SUPABASE_URL` | Existing Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Project publishable key (legacy anon key also works) |
 | `ADMIN_SECRET_KEY` | Separate CLI infrastructure secret if CLI provisioning is used |
+| `FIREBASE_PROJECT_ID` | (Optional for Push Wake) Firebase Google Cloud Project ID |
+| `FIREBASE_CLIENT_EMAIL` | (Optional for Push Wake) Firebase service account email |
+| `FIREBASE_PRIVATE_KEY` | (Optional for Push Wake) Firebase service account PEM private key (supports escaped newlines `\n`) |
 
-The runtime uses the publishable key, never a Supabase secret/service-role key. Do not deploy `SUPABASE_SECRET_KEY` or `SWIFT_OWNER_PASSWORD`. Remove retired `SWIFT_OWNER_PASSWORD_HASH`, `ADMIN_SESSION_SECRET`, and `ADMIN_SETUP_TOKEN` variables. Redeploy after changing the Supabase URL, key, or owner allowlist.
+The runtime uses the publishable key, never a Supabase secret/service-role key. Do not deploy `SUPABASE_SECRET_KEY` or `SWIFT_OWNER_PASSWORD`. Remove retired `SWIFT_OWNER_PASSWORD_HASH`, `ADMIN_SESSION_SECRET`, and `ADMIN_SETUP_TOKEN` variables. Redeploy after changing the Supabase URL, key, or owner allowlist. Firebase credentials are used server-side only for high-priority Android FCM wake signals; if omitted, the backend preserves SMS jobs in the durable PostgreSQL queue for gateway polling fallback.
 
 Owner sessions are Supabase-issued and refreshed through Next.js middleware. Every private API request validates the user with Supabase Auth and checks the exact owner UUID and confirmed email. Legacy phone-based records and custom session cookies no longer authorize access. Existing projects, API keys, gateways, and OTP data remain intact.
 

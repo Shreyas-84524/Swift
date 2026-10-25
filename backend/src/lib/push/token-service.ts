@@ -99,7 +99,7 @@ export class PushTokenService {
       // If token belongs to this gateway and is already active: idempotent success
       if (record.is_valid) {
         await db.query(
-          `UPDATE gateway_push_tokens 
+          `UPDATE gateway_push_tokens
            SET last_registered_at = NOW(),
                device_fingerprint = COALESCE($2, device_fingerprint)
            WHERE id = $1`,
@@ -126,8 +126,8 @@ export class PushTokenService {
 
       // Invalidate existing active tokens for this gateway
       await client.query(
-        `UPDATE gateway_push_tokens 
-         SET is_valid = FALSE 
+        `UPDATE gateway_push_tokens
+         SET is_valid = FALSE
          WHERE gateway_id = $1 AND provider = 'FCM' AND is_valid = TRUE`,
         [gatewayId]
       );
@@ -188,8 +188,8 @@ export class PushTokenService {
   ): Promise<number> {
     if (specificToken) {
       const res = await db.query(
-        `UPDATE gateway_push_tokens 
-         SET is_valid = FALSE 
+        `UPDATE gateway_push_tokens
+         SET is_valid = FALSE
          WHERE gateway_id = $1 AND token = $2 AND is_valid = TRUE`,
         [gatewayId, specificToken.trim()]
       );
@@ -197,8 +197,8 @@ export class PushTokenService {
     }
 
     const res = await db.query(
-      `UPDATE gateway_push_tokens 
-       SET is_valid = FALSE 
+      `UPDATE gateway_push_tokens
+       SET is_valid = FALSE
        WHERE gateway_id = $1 AND is_valid = TRUE`,
       [gatewayId]
     );

@@ -30,6 +30,12 @@ import { POST as activateTemplateRoute } from '../src/app/api/v1/admin/projects/
 import { POST as archiveTemplateRoute } from '../src/app/api/v1/admin/projects/[projectId]/templates/[templateId]/archive/route';
 import { GET as getTemplatePreviewRoute, POST as postTemplatePreviewRoute } from '../src/app/api/v1/admin/projects/[projectId]/templates/[templateId]/preview/route';
 import { POST as previewDraftRoute } from '../src/app/api/v1/admin/projects/[projectId]/templates/preview/route';
+import { PUT as registerPushTokenRoute, DELETE as deletePushTokenRoute } from '../src/app/api/v1/gateway/push-token/route';
+import { PushTokenService } from '../src/lib/push/token-service';
+import { GatewaySelector } from '../src/lib/push/gateway-selector';
+import { FcmSender, sanitizeFirebaseError } from '../src/lib/push/fcm-sender';
+import { PushService } from '../src/lib/push/push-service';
+import { setMockFirebaseMessaging, resetFirebaseAdminState, isFirebaseConfigured } from '../src/lib/push/firebase-admin';
 
 let simulateTemplateDbError = false;
 
@@ -520,13 +526,16 @@ const store = {
     return { rows: [{ count: store.gateways.size.toString() }], rowCount: 1 };
   }
 
-  // Update Gateway heartbeat
+  // Update Gateway heartbeat / metadata
   if (sql.includes('UPDATE gateways SET')) {
     const gwId = params[0];
     const g = store.gateways.get(gwId);
     if (g) {
+      if (sql.includes('app_version = $2')) {
+        g.app_version = params[1];
+      }
       g.last_seen_at = new Date();
-      return { rows: [], rowCount: 1 };
+      return { rows: [g], rowCount: 1 };
     }
     return { rows: [], rowCount: 0 };
   }
@@ -832,16 +841,132 @@ const store = {
     return { rows: [], rowCount: 0 };
   }
 
-  // Insert gateway push token
+  // Gateway selection join query (Phase 2)
+  if (sql.includes('FROM gateways g') && sql.includes('JOIN gateway_push_tokens t')) {
+    const rows: any[] = [];
+    for (const g of store.gateways.values()) {
+      if (g.is_active && g.worker_enabled) {
+        for (const t of store.gatewayPushTokens.values()) {
+          if (t.gateway_id === g.id && t.is_valid && t.provider === 'FCM' && t.platform === 'ANDROID') {
+            rows.push({
+              gateway_id: g.id,
+              gateway_name: g.name,
+              token_id: t.id,
+              token: t.token,
+              platform: t.platform,
+              last_registered_at: t.last_registered_at,
+              created_at: g.created_at,
+            });
+          }
+        }
+      }
+    }
+    rows.sort((a, b) => new Date(b.last_registered_at).getTime() - new Date(a.last_registered_at).getTime());
+    return { rows, rowCount: rows.length };
+  }
+
+  // Lookup push token by string
+  if (sql.includes('FROM gateway_push_tokens') && sql.includes('WHERE token = $1')) {
+    const tokenStr = params[0];
+    const match = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === tokenStr);
+    return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
+  }
+
+  // Update push token last_registered_at
+  if (sql.includes('UPDATE gateway_push_tokens') && sql.includes('SET last_registered_at = NOW()')) {
+    const [tokenId, fingerprint] = params;
+    const t = store.gatewayPushTokens.get(tokenId);
+    if (t) {
+      t.last_registered_at = new Date().toISOString();
+      if (fingerprint) t.device_fingerprint = fingerprint;
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Invalidate push tokens for gateway
+  if (sql.includes('UPDATE gateway_push_tokens') && sql.includes('SET is_valid = FALSE') && sql.includes('WHERE gateway_id = $1 AND provider =')) {
+    const gatewayId = params[0];
+    let count = 0;
+    for (const t of store.gatewayPushTokens.values()) {
+      if (t.gateway_id === gatewayId && t.provider === 'FCM' && t.is_valid) {
+        t.is_valid = false;
+        count++;
+      }
+    }
+    return { rows: [], rowCount: count };
+  }
+
+  if (sql.includes('UPDATE gateway_push_tokens') && sql.includes('SET is_valid = FALSE') && sql.includes('WHERE gateway_id = $1 AND token = $2')) {
+    const [gatewayId, token] = params;
+    let count = 0;
+    for (const t of store.gatewayPushTokens.values()) {
+      if (t.gateway_id === gatewayId && t.token === token && t.is_valid) {
+        t.is_valid = false;
+        count++;
+      }
+    }
+    return { rows: [], rowCount: count };
+  }
+
+  if (sql.includes('UPDATE gateway_push_tokens') && sql.includes('SET is_valid = FALSE') && sql.includes('WHERE gateway_id = $1 AND is_valid = TRUE')) {
+    const gatewayId = params[0];
+    let count = 0;
+    for (const t of store.gatewayPushTokens.values()) {
+      if (t.gateway_id === gatewayId && t.is_valid) {
+        t.is_valid = false;
+        count++;
+      }
+    }
+    return { rows: [], rowCount: count };
+  }
+
+  // Query active token for gateway
+  if (sql.includes('SELECT token FROM gateway_push_tokens') && sql.includes('WHERE gateway_id = $1 AND is_valid = TRUE')) {
+    const gatewayId = params[0];
+    const tokens = Array.from(store.gatewayPushTokens.values())
+      .filter((t) => t.gateway_id === gatewayId && t.is_valid && t.provider === 'FCM')
+      .sort((a, b) => new Date(b.last_registered_at).getTime() - new Date(a.last_registered_at).getTime());
+    return { rows: tokens.map((t) => ({ token: t.token })), rowCount: tokens.length };
+  }
+
+  // Update token last_used_at
+  if (sql.includes('UPDATE gateway_push_tokens') && sql.includes('SET last_used_at = NOW()')) {
+    const [gatewayId, token] = params;
+    for (const t of store.gatewayPushTokens.values()) {
+      if (t.gateway_id === gatewayId && t.token === token) {
+        t.last_used_at = new Date().toISOString();
+      }
+    }
+    return { rows: [], rowCount: 1 };
+  }
+
+  // Insert or rotate gateway push token
   if (sql.includes('INSERT INTO gateway_push_tokens')) {
+    const gatewayId = params[0];
+    const tokenStr = params[1];
+    const fingerprint = params[2] || null;
+
+    let existing = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === tokenStr);
+    if (existing) {
+      if (existing.gateway_id !== gatewayId) {
+        // Cross-gateway conflict: WHERE clause does not match
+        return { rows: [], rowCount: 0 };
+      }
+      existing.is_valid = true;
+      existing.last_registered_at = new Date().toISOString();
+      if (fingerprint) existing.device_fingerprint = fingerprint;
+      return { rows: [existing], rowCount: 1 };
+    }
+
     const id = crypto.randomUUID();
     const token = {
       id,
-      gateway_id: params[0],
-      token: params[1],
-      provider: params[2] || 'FCM',
-      platform: params[3] || 'ANDROID',
-      device_fingerprint: params[4] || null,
+      gateway_id: gatewayId,
+      token: tokenStr,
+      provider: 'FCM',
+      platform: 'ANDROID',
+      device_fingerprint: fingerprint,
       is_valid: true,
       last_registered_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -853,21 +978,147 @@ const store = {
   // Insert notification outbox
   if (sql.includes('INSERT INTO notification_outbox')) {
     const id = crypto.randomUUID();
+    let gateway_id: string | null = null;
+    let job_id: string | null = null;
+    let payload: Record<string, unknown> = {};
+    let status: string = 'PENDING';
+    let attempts = 0;
+    let max_attempts = 5;
+    let response_code: string | null = null;
+    let error_message: string | null = null;
+    let deduplication_key: string | null = null;
+
+    if (sql.includes('VALUES ($1, $2, \'FCM\', \'HIGH\', $3, \'PENDING\', 0, 5, NOW(), $4)')) {
+      gateway_id = params[0] || null;
+      job_id = params[1] || null;
+      payload = typeof params[2] === 'string' ? JSON.parse(params[2]) : params[2];
+      status = 'PENDING';
+      deduplication_key = params[3] || null;
+    } else if (sql.includes('VALUES (NULL, $1, \'FCM\', \'HIGH\', $2, \'FAILED\', 0, 5, NOW(), $3, $4, $5)')) {
+      gateway_id = null;
+      job_id = params[0] || null;
+      payload = typeof params[1] === 'string' ? JSON.parse(params[1]) : params[1];
+      status = 'FAILED';
+      response_code = params[2] || null;
+      error_message = params[3] || null;
+      deduplication_key = params[4] || null;
+    } else {
+      gateway_id = params[0] || null;
+      job_id = params[1] || null;
+      payload = typeof params[4] === 'string' && params[4].startsWith('{') ? JSON.parse(params[4]) : (params[4] || {});
+      status = params[5] || 'PENDING';
+      deduplication_key = params[6] || null;
+    }
+
+    if (deduplication_key) {
+      for (const existing of store.notificationOutbox.values()) {
+        if (existing.deduplication_key === deduplication_key) {
+          throw new Error(`duplicate key value violates unique constraint "idx_notification_outbox_dedup"`);
+        }
+      }
+    }
+
     const item = {
       id,
-      gateway_id: params[0] || null,
-      job_id: params[1] || null,
-      channel: params[2] || 'FCM',
-      priority: params[3] || 'HIGH',
-      payload: typeof params[4] === 'string' ? JSON.parse(params[4]) : params[4],
-      status: 'PENDING',
-      attempts: 0,
-      max_attempts: 5,
+      gateway_id,
+      job_id,
+      channel: 'FCM',
+      priority: 'HIGH',
+      payload,
+      status,
+      attempts,
+      max_attempts,
+      response_code,
+      error_message,
+      deduplication_key,
       next_attempt_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
+      sent_at: null,
     };
     store.notificationOutbox.set(id, item);
     return { rows: [{ id }], rowCount: 1 };
+  }
+
+  // Atomic outbox claim for processing
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'PROCESSING\'')) {
+    const outboxId = params[0];
+    const item = store.notificationOutbox.get(outboxId);
+    const now = Date.now();
+    const isDue = !item?.next_attempt_at || new Date(item.next_attempt_at).getTime() <= now;
+    const isStaleProcessing = item?.status === 'PROCESSING' &&
+      !!item.last_attempt_at &&
+      new Date(item.last_attempt_at).getTime() < now - 5 * 60 * 1000;
+    if (item && (((item.status === 'PENDING' || item.status === 'FAILED') && isDue) || isStaleProcessing)) {
+      item.status = 'PROCESSING';
+      item.attempts = (item.attempts || 0) + 1;
+      item.last_attempt_at = new Date().toISOString();
+      return {
+        rows: [{
+          id: item.id,
+          gateway_id: item.gateway_id,
+          attempts: item.attempts,
+          max_attempts: item.max_attempts || 5,
+        }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Update outbox gateway_id upon late selection
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('SET gateway_id = $1 WHERE id = $2')) {
+    const [gatewayId, outboxId] = params;
+    const item = store.notificationOutbox.get(outboxId);
+    if (item) {
+      item.gateway_id = gatewayId;
+      return { rows: [item], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Update outbox status SENT
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'SENT\'')) {
+    const outboxId = params[0];
+    const item = store.notificationOutbox.get(outboxId);
+    if (item) {
+      item.status = 'SENT';
+      item.sent_at = new Date().toISOString();
+      item.response_code = 'SENT';
+      item.error_message = null;
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Update outbox status DEAD_LETTER
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'DEAD_LETTER\'')) {
+    const outboxId = params[0];
+    const item = store.notificationOutbox.get(outboxId);
+    if (item) {
+      item.status = 'DEAD_LETTER';
+      item.response_code = 'MAX_ATTEMPTS_EXCEEDED';
+      item.error_message = params[1] || 'Exceeded maximum delivery attempts';
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  // Update outbox status FAILED
+  if (sql.includes('UPDATE notification_outbox') && sql.includes('status = \'FAILED\'')) {
+    const outboxId = params[0];
+    const item = store.notificationOutbox.get(outboxId);
+    if (item) {
+      item.status = 'FAILED';
+      if (params.length > 1) {
+        item.response_code = params[1];
+        item.error_message = params[2];
+        if (params[3]) {
+          item.next_attempt_at = new Date(Date.now() + parseInt(params[3], 10) * 1000).toISOString();
+        }
+      }
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
   }
 
   return { rows: [], rowCount: 0 };
@@ -913,10 +1164,28 @@ function verifyDeferredDatabaseInvariants(): void {
 
 // Override getClient for transactions
 (db as any).getClient = async function () {
+  let inFlight = {
+    challenges: [] as string[],
+    jobs: [] as string[],
+    outbox: [] as string[],
+  };
+
   return {
     query: async (text: string, params: any[] = []) => {
+      if (text.includes('BEGIN')) {
+        inFlight = { challenges: [], jobs: [], outbox: [] };
+        return { rows: [], rowCount: 0 };
+      }
       if (text.includes('COMMIT')) {
         verifyDeferredDatabaseInvariants();
+        inFlight = { challenges: [], jobs: [], outbox: [] };
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('ROLLBACK')) {
+        for (const id of inFlight.challenges) store.otpChallenges.delete(id);
+        for (const id of inFlight.jobs) store.smsJobs.delete(id);
+        for (const id of inFlight.outbox) store.notificationOutbox.delete(id);
+        inFlight = { challenges: [], jobs: [], outbox: [] };
         return { rows: [], rowCount: 0 };
       }
       if (text.includes('WITH next_jobs AS')) {
@@ -942,7 +1211,14 @@ function verifyDeferredDatabaseInvariants(): void {
 
         return { rows: claimed, rowCount: claimed.length };
       }
-      return (db as any).query(text, params);
+
+      const res = await (db as any).query(text, params);
+      if (res?.rows?.[0]?.id) {
+        if (text.includes('INSERT INTO otp_challenges')) inFlight.challenges.push(res.rows[0].id);
+        if (text.includes('INSERT INTO sms_jobs')) inFlight.jobs.push(res.rows[0].id);
+        if (text.includes('INSERT INTO notification_outbox')) inFlight.outbox.push(res.rows[0].id);
+      }
+      return res;
     },
     release: () => {},
   };
@@ -2052,6 +2328,619 @@ async function runAllTests() {
     store.messageTemplateVersions.delete(approvedTestVerId);
   }
   assert(approvedWithActiveVerRejected, 'Database Invariant: APPROVED template cannot receive a non-null active_version_id (check_violation)');
+
+  // ============================================================================
+  // --- 20. Phase 2: Transactional FCM Push Wake & Gateway Token Lifecycle ---
+  // ============================================================================
+  console.log('\n▶ Test Suite 20: Transactional FCM Push Wake & Gateway Token Lifecycle');
+
+  // Configure test environment variables for Firebase
+  process.env.FIREBASE_PROJECT_ID = 'swift-test-firebase-project';
+  process.env.FIREBASE_CLIENT_EMAIL = 'firebase-adminsdk@swift-test.iam.gserviceaccount.com';
+  process.env.FIREBASE_PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\\n-----END PRIVATE KEY-----\\n';
+
+  let lastSentFcmMessage: any = null;
+  const mockMessaging = {
+    send: async (msg: any) => {
+      lastSentFcmMessage = msg;
+      return 'projects/swift-test/messages/msg-test-12345';
+    },
+  } as any;
+  setMockFirebaseMessaging(mockMessaging);
+
+  // Setup test gateway 1
+  const phase2GatewayId = crypto.randomUUID();
+  const phase2GatewayKeyRaw = 'otp_gw_phase2_test_valid_key_1234567890';
+  const phase2GatewayKeyHash = hashApiKey(phase2GatewayKeyRaw);
+  store.gateways.set(phase2GatewayId, {
+    id: phase2GatewayId,
+    name: 'Phase 2 Test Gateway 1',
+    device_id: 'device-p2-test-1',
+    model: 'Pixel 8',
+    android_sdk: 34,
+    app_version: '2.0.0',
+    sim_status: 'READY',
+    battery_pct: 95,
+    worker_enabled: true,
+    is_active: true,
+    last_seen_at: new Date(),
+    created_at: new Date(),
+  });
+  store.gatewayKeys.set('key-p2-test-1', {
+    id: 'key-p2-test-1',
+    gateway_id: phase2GatewayId,
+    key_prefix: 'otp_gw_phase2_',
+    key_hash: phase2GatewayKeyHash,
+    status: 'ACTIVE',
+  });
+
+  // Setup test gateway 2
+  const phase2GatewayId2 = crypto.randomUUID();
+  const phase2GatewayKeyRaw2 = 'otp_gw_phase2_test_valid_key_0987654321';
+  const phase2GatewayKeyHash2 = hashApiKey(phase2GatewayKeyRaw2);
+  store.gateways.set(phase2GatewayId2, {
+    id: phase2GatewayId2,
+    name: 'Phase 2 Test Gateway 2',
+    device_id: 'device-p2-test-2',
+    model: 'Galaxy S24',
+    android_sdk: 34,
+    app_version: '2.0.0',
+    sim_status: 'READY',
+    battery_pct: 90,
+    worker_enabled: true,
+    is_active: true,
+    last_seen_at: new Date(),
+    created_at: new Date(),
+  });
+  store.gatewayKeys.set('key-p2-test-2', {
+    id: 'key-p2-test-2',
+    gateway_id: phase2GatewayId2,
+    key_prefix: 'otp_gw_phase2_',
+    key_hash: phase2GatewayKeyHash2,
+    status: 'ACTIVE',
+  });
+
+  // 11. Gateway token creation
+  const createTokenReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+    body: {
+      token: 'fcm_token_initial_111111111111',
+      provider: 'FCM',
+      platform: 'ANDROID',
+      device_fingerprint: 'fp-device-1',
+    },
+  });
+  const createTokenRes = await registerPushTokenRoute(createTokenReq);
+  assert(createTokenRes.status === 200, 'Gateway token creation returns 200 OK');
+  const createTokenData = await createTokenRes.json();
+  assert(createTokenData.success === true, 'Gateway token creation response success is true');
+  assert(createTokenData.data.registered === true, 'Gateway token registered flag is true');
+  assert(createTokenData.data.provider === 'FCM', 'Gateway token provider is FCM');
+  assert(createTokenData.data.platform === 'ANDROID', 'Gateway token platform is ANDROID');
+  assert(createTokenData.data.token === undefined, 'Security: Complete stored token is never returned in API response');
+
+  // Verify stored token in DB
+  const storedToken = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === 'fcm_token_initial_111111111111');
+  assert(storedToken !== undefined && storedToken.is_valid === true, 'Stored gateway token is valid');
+
+  // 12. Gateway token rotation
+  const rotateTokenReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+    body: {
+      token: 'fcm_token_rotated_222222222222',
+      provider: 'FCM',
+      platform: 'ANDROID',
+      device_fingerprint: 'fp-device-1',
+    },
+  });
+  const rotateTokenRes = await registerPushTokenRoute(rotateTokenReq);
+  assert(rotateTokenRes.status === 200, 'Gateway token rotation returns 200 OK');
+  const oldToken = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === 'fcm_token_initial_111111111111');
+  const newToken = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === 'fcm_token_rotated_222222222222');
+  assert(oldToken?.is_valid === false, 'Gateway token rotation: previous token invalidated');
+  assert(newToken?.is_valid === true, 'Gateway token rotation: new token is active');
+
+  // 13. Same-token registration is idempotent
+  const idempTokenReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+    body: {
+      token: 'fcm_token_rotated_222222222222',
+      provider: 'FCM',
+      platform: 'ANDROID',
+    },
+  });
+  const idempTokenRes = await registerPushTokenRoute(idempTokenReq);
+  assert(idempTokenRes.status === 200, 'Same-token registration is idempotent (200 OK)');
+  const allForGw1 = Array.from(store.gatewayPushTokens.values()).filter((t) => t.gateway_id === phase2GatewayId && t.is_valid);
+  assert(allForGw1.length === 1, 'Exactly one active token remains for gateway after idempotent registration');
+
+  // 14. Token cannot move silently between gateways
+  const crossGwTokenReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw2 },
+    body: {
+      token: 'fcm_token_rotated_222222222222',
+      provider: 'FCM',
+      platform: 'ANDROID',
+    },
+  });
+  const crossGwTokenRes = await registerPushTokenRoute(crossGwTokenReq);
+  assert(crossGwTokenRes.status === 409, 'Token cannot move silently between gateways (rejected with 409 Conflict)');
+  const tokenOwnerCheck = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === 'fcm_token_rotated_222222222222');
+  assert(tokenOwnerCheck?.gateway_id === phase2GatewayId, 'Token ownership strictly preserved on original gateway');
+
+  // 15. Unauthenticated token registration is rejected
+  const p2UnauthReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    body: { token: 'fcm_token_unauth_test', provider: 'FCM', platform: 'ANDROID' },
+  });
+  const p2UnauthRes = await registerPushTokenRoute(p2UnauthReq);
+  assert(p2UnauthRes.status === 401, 'Unauthenticated token registration is rejected (401)');
+
+  // 16. Project key cannot register a gateway token
+  const projKeyGwReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': 'otp_proj_unauthorized_key_test' },
+    body: { token: 'fcm_token_proj_test', provider: 'FCM', platform: 'ANDROID' },
+  });
+  const projKeyGwRes = await registerPushTokenRoute(projKeyGwReq);
+  assert(projKeyGwRes.status === 401, 'Project key cannot register a gateway token (401)');
+
+  // Token deletion / invalidation route
+  const deleteTokenReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'DELETE',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+  });
+  const deleteTokenRes = await deletePushTokenRoute(deleteTokenReq);
+  assert(deleteTokenRes.status === 200, 'DELETE /api/v1/gateway/push-token returns 200 OK');
+  const checkInvalidated = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === 'fcm_token_rotated_222222222222');
+  assert(checkInvalidated?.is_valid === false, 'Authenticated token invalidation sets is_valid to false');
+
+  // Re-register active token on Gateway 1 for subsequent tests
+  const gw1Token = 'fcm_token_gw1_active_wake_token_abcdef';
+  await PushTokenService.registerToken(phase2GatewayId, {
+    token: gw1Token,
+    provider: 'FCM',
+    platform: 'ANDROID',
+  });
+  // Disable Gateway 2 worker so gateway selection is deterministic for Gateway 1
+  store.gateways.get(phase2GatewayId2)!.worker_enabled = false;
+
+  // 1. Successful atomic OTP challenge, SMS job and outbox creation
+  const atomicOtpPhone = '+919988776655';
+  const atomicOtpRes = await OtpService.sendOtp(project, { phone: atomicOtpPhone });
+  assert(atomicOtpRes.status === 200, 'Successful atomic OTP send returns HTTP 200');
+  const atomicChallengeId = (atomicOtpRes.body as any).request_id;
+  assert(!!atomicChallengeId, 'OTP challenge ID generated and returned');
+
+  // Verify challenge in DB
+  const challengeRow = store.otpChallenges.get(atomicChallengeId);
+  assert(challengeRow !== undefined, 'OTP challenge persisted in database');
+
+  // Verify SMS job in DB
+  const jobRow = Array.from(store.smsJobs.values()).find((j) => j.challenge_id === atomicChallengeId);
+  assert(jobRow !== undefined, 'SMS job persisted in database linked to challenge');
+  assert(jobRow?.status === 'QUEUED', 'SMS job status is QUEUED');
+
+  // Verify Notification Outbox in DB
+  const outboxRow = Array.from(store.notificationOutbox.values()).find((o) => o.job_id === jobRow?.id);
+  assert(outboxRow !== undefined, 'Notification outbox item created in database linked to SMS job');
+  assert(outboxRow?.gateway_id === phase2GatewayId, 'Outbox item assigned to deterministic active gateway');
+  assert(outboxRow?.channel === 'FCM', 'Outbox channel is FCM');
+  assert(outboxRow?.priority === 'HIGH', 'Outbox priority is HIGH');
+  assert(outboxRow?.deduplication_key === `otp_challenge:${atomicChallengeId}`, 'Outbox deduplication_key matches challenge');
+
+  // 3. FCM success marks outbox SENT
+  assert(outboxRow?.status === 'SENT', 'FCM success marks outbox status as SENT');
+  assert(outboxRow?.sent_at !== null, 'Outbox sent_at timestamp is populated');
+  assert(outboxRow?.response_code === 'SENT', 'Outbox response_code is SENT');
+
+  // 9. Payload contains only type=JOBS_AVAILABLE
+  assert(lastSentFcmMessage !== null, 'FCM message was dispatched to Firebase Admin');
+  assert(lastSentFcmMessage.data?.type === 'JOBS_AVAILABLE', 'Payload data.type is JOBS_AVAILABLE');
+  assert(Object.keys(lastSentFcmMessage.data).length === 1, 'Payload contains ONLY data.type (zero extraneous properties)');
+  assert(lastSentFcmMessage.android?.priority === 'high', 'Android push priority is high');
+  assert(lastSentFcmMessage.android?.collapseKey === 'swift_jobs_available', 'Android collapse key set to swift_jobs_available');
+  assert(lastSentFcmMessage.android?.ttl === 60000, 'Android TTL is 60 seconds (60000ms)');
+
+  // 10. Payload contains no OTP, phone number, message or credentials
+  const fcmPayloadStr = JSON.stringify(lastSentFcmMessage);
+  assert(!fcmPayloadStr.includes('otp'), 'Payload contains NO "otp" key');
+  assert(!fcmPayloadStr.includes(atomicOtpPhone), 'Payload contains NO phone number');
+  assert(!fcmPayloadStr.includes('CivicFix'), 'Payload contains NO SMS message body');
+  assert(!fcmPayloadStr.includes(phase2GatewayKeyRaw), 'Payload contains NO gateway key or credential');
+  assert(!fcmPayloadStr.includes('PRIVATE KEY'), 'Payload contains NO private key credentials');
+
+  // 2. Database rollback creates none of the three records
+  const rollbackClient = await db.getClient();
+  await rollbackClient.query('BEGIN');
+  const rbChRes = await rollbackClient.query<{ id: string }>(
+    `INSERT INTO otp_challenges (project_id, phone_number, otp_hash, salt, max_attempts, expires_at, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [project.id, '+919999900000', 'hash_test', 'salt_test', 3, new Date().toISOString(), '{}']
+  );
+  const rbChId = rbChRes.rows[0].id;
+  const rbJbRes = await rollbackClient.query<{ id: string }>(
+    `INSERT INTO sms_jobs (project_id, challenge_id, phone_number, message, status)
+     VALUES ($1, $2, $3, $4, 'QUEUED') RETURNING id`,
+    [project.id, rbChId, '+919999900000', 'Test rollback']
+  );
+  const rbJbId = rbJbRes.rows[0].id;
+  const rbObRes = await rollbackClient.query<{ id: string }>(
+    `INSERT INTO notification_outbox (gateway_id, job_id, channel, priority, payload, status, attempts, max_attempts, next_attempt_at, deduplication_key)
+     VALUES ($1, $2, 'FCM', 'HIGH', $3, 'PENDING', 0, 5, NOW(), $4) RETURNING id`,
+    [phase2GatewayId, rbJbId, JSON.stringify({ type: 'JOBS_AVAILABLE' }), `otp_challenge:${rbChId}`]
+  );
+  const rbObId = rbObRes.rows[0].id;
+  // Trigger transaction rollback
+  await rollbackClient.query('ROLLBACK');
+  rollbackClient.release();
+
+  assert(!store.otpChallenges.has(rbChId), 'Database rollback: OTP challenge record is not persisted');
+  assert(!store.smsJobs.has(rbJbId), 'Database rollback: SMS job record is not persisted');
+  assert(!store.notificationOutbox.has(rbObId), 'Database rollback: Outbox item record is not persisted');
+
+  // 4. FCM transient failure preserves the SMS job and marks outbox FAILED
+  const transientJobId = crypto.randomUUID();
+  store.smsJobs.set(transientJobId, {
+    id: transientJobId,
+    project_id: project.id,
+    challenge_id: null,
+    assigned_gateway_id: null,
+    phone_number: '+919876500001',
+    message: 'Transient test',
+    status: 'QUEUED',
+    attempts: 0,
+    lease_expires_at: null,
+    failure_reason: null,
+    created_at: new Date().toISOString(),
+    picked_up_at: null,
+    sent_at: null,
+    delivered_at: null,
+    failed_at: null,
+  });
+  const transientOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(transientOutboxId, {
+    id: transientOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: transientJobId,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 0,
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  // Inject transient error into mock messaging
+  mockMessaging.send = async () => {
+    const err: any = new Error('Firebase server unavailable');
+    err.code = 'messaging/server-unavailable';
+    throw err;
+  };
+
+  const transientDispatchRes = await PushService.dispatchOutboxItem(transientOutboxId);
+  assert(transientDispatchRes.status === 'FAILED', 'FCM transient failure marks outbox FAILED');
+  assert(transientDispatchRes.responseCode === 'TRANSIENT_FAILURE', 'Outbox response code is TRANSIENT_FAILURE');
+  const transientOutboxAfter = store.notificationOutbox.get(transientOutboxId);
+  assert(transientOutboxAfter?.status === 'FAILED', 'Persisted outbox status is FAILED');
+  assert(transientOutboxAfter?.next_attempt_at !== undefined, 'Transient failure sets next_attempt_at for retry');
+  const transientSmsJobAfter = store.smsJobs.get(transientJobId);
+  assert(transientSmsJobAfter?.status === 'QUEUED', 'SMS job strictly preserved in QUEUED state after push failure');
+
+  // 5. Invalid/unregistered token becomes invalid
+  const unregJobId = crypto.randomUUID();
+  store.smsJobs.set(unregJobId, {
+    id: unregJobId,
+    project_id: project.id,
+    challenge_id: null,
+    assigned_gateway_id: null,
+    phone_number: '+919876500002',
+    message: 'Unregistered test',
+    status: 'QUEUED',
+    attempts: 0,
+    lease_expires_at: null,
+    failure_reason: null,
+    created_at: new Date().toISOString(),
+    picked_up_at: null,
+    sent_at: null,
+    delivered_at: null,
+    failed_at: null,
+  });
+  const unregOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(unregOutboxId, {
+    id: unregOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: unregJobId,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 0,
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  // Inject unregistered token error into mock messaging
+  mockMessaging.send = async () => {
+    const err: any = new Error('Device token is no longer registered');
+    err.code = 'messaging/registration-token-not-registered';
+    throw err;
+  };
+
+  const unregDispatchRes = await PushService.dispatchOutboxItem(unregOutboxId);
+  assert(unregDispatchRes.status === 'FAILED', 'Unregistered token marks outbox FAILED');
+  assert(unregDispatchRes.responseCode === 'UNREGISTERED_TOKEN', 'Response code is UNREGISTERED_TOKEN');
+  const invalidTokenCheck = Array.from(store.gatewayPushTokens.values()).find((t) => t.token === gw1Token);
+  assert(invalidTokenCheck?.is_valid === false, 'Invalid/unregistered token is automatically invalidated (is_valid = false)');
+  const unregSmsJobAfter = store.smsJobs.get(unregJobId);
+  assert(unregSmsJobAfter?.status === 'QUEUED', 'SMS job strictly preserved in QUEUED state after invalid token error');
+
+  // Restore working mock messaging and re-activate token
+  mockMessaging.send = async (msg: any) => {
+    lastSentFcmMessage = msg;
+    return 'projects/swift-test/messages/msg-test-resumed';
+  };
+  const activeWakeToken2 = 'fcm_token_gw1_resumed_valid_token_33333';
+  await PushTokenService.registerToken(phase2GatewayId, {
+    token: activeWakeToken2,
+    provider: 'FCM',
+    platform: 'ANDROID',
+  });
+
+  // 6. Missing Firebase configuration is handled safely
+  const savedProjectId = process.env.FIREBASE_PROJECT_ID;
+  delete process.env.FIREBASE_PROJECT_ID;
+  setMockFirebaseMessaging(null);
+
+  const missingConfigRes = await FcmSender.sendWakeSignal(activeWakeToken2);
+  assert(missingConfigRes.success === false, 'Missing Firebase configuration returns failure result');
+  assert(missingConfigRes.responseCode === 'FIREBASE_NOT_CONFIGURED', 'Returns sanitized FIREBASE_NOT_CONFIGURED code');
+
+  // Restore Firebase config
+  process.env.FIREBASE_PROJECT_ID = savedProjectId;
+  setMockFirebaseMessaging(mockMessaging);
+
+  // 7. Idempotent OTP replay creates no duplicate job or outbox
+  const idempKey = 'p2-unique-idemp-key-xyz';
+  const idempPhone = '+919777788881';
+  const initialJobCount = store.smsJobs.size;
+  const initialOutboxCount = store.notificationOutbox.size;
+  const initialChallengesTotal = store.otpChallenges.size;
+
+  const firstIdempSend = await OtpService.sendOtp(project, {
+    phone: idempPhone,
+    idempotency_key: idempKey,
+  });
+  assert(firstIdempSend.status === 200, 'Initial send with idempotency key succeeds (200)');
+  const idempChallengeId = (firstIdempSend.body as any).request_id;
+
+  const secondIdempSend = await OtpService.sendOtp(project, {
+    phone: idempPhone,
+    idempotency_key: idempKey,
+  });
+  assert(secondIdempSend.status === 200, 'Idempotent replay returns 200 OK');
+  assert((secondIdempSend.body as any).request_id === idempChallengeId, 'Replayed challenge ID matches original');
+  assert(store.smsJobs.size === initialJobCount + 1, 'Idempotent replay: zero additional SMS jobs enqueued');
+  assert(store.notificationOutbox.size === initialOutboxCount + 1, 'Idempotent replay: zero duplicate outbox wake records created');
+  assert(store.otpChallenges.size === initialChallengesTotal + 1, 'Idempotent replay: zero duplicate challenges created');
+
+  // 8. Concurrent outbox dispatch claims only once
+  const concurrentOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(concurrentOutboxId, {
+    id: concurrentOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 0,
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  const [concurrent1, concurrent2] = await Promise.all([
+    PushService.dispatchOutboxItem(concurrentOutboxId),
+    PushService.dispatchOutboxItem(concurrentOutboxId),
+  ]);
+  const concurrentStatuses = [concurrent1.status, concurrent2.status];
+  assert(concurrentStatuses.includes('SENT'), 'Concurrent dispatch: one worker transitions to SENT');
+  assert(concurrentStatuses.includes('SKIPPED'), 'Concurrent dispatch: duplicate worker skips claim');
+
+  // 17. No-valid-token behavior preserves polling fallback
+  // Invalidate all tokens for Gateway 1 and ensure Gateway 2 has no tokens
+  for (const t of store.gatewayPushTokens.values()) {
+    t.is_valid = false;
+  }
+  const noTokenOtpPhone = '+919876500077';
+  const noTokenSendRes = await OtpService.sendOtp(project, { phone: noTokenOtpPhone });
+  assert(noTokenSendRes.status === 200, 'No-valid-token sendOtp returns 200 OK to project client');
+  assert((noTokenSendRes.body as any).error === undefined, 'No internal token errors leaked to client');
+  const noTokenChallengeId = (noTokenSendRes.body as any).request_id;
+  const noTokenSmsJob = Array.from(store.smsJobs.values()).find((j) => j.challenge_id === noTokenChallengeId);
+  assert(noTokenSmsJob?.status === 'QUEUED', 'Durable SMS job remains safely QUEUED in database');
+  const noTokenOutbox = Array.from(store.notificationOutbox.values()).find((o) => o.job_id === noTokenSmsJob?.id);
+  assert(noTokenOutbox?.status === 'FAILED', 'Outbox record marked FAILED due to no valid push token');
+  assert(noTokenOutbox?.response_code === 'NO_VALID_GATEWAY_TOKEN', 'Outbox response_code is NO_VALID_GATEWAY_TOKEN');
+
+  // Polling fallback claims the job smoothly
+  const claimedJobs = await JobQueue.claimJobs(phase2GatewayId, 10, 60);
+  const claimedTarget = claimedJobs.find((j) => j.phone_number === noTokenOtpPhone);
+  assert(claimedTarget !== undefined, 'Polling fallback: Gateway successfully claimed durable queued job');
+  assert(claimedTarget?.phone_number === noTokenOtpPhone, 'Polling claim returned the durable SMS job');
+
+  // 18. Firebase errors are sanitized before persistence/logging
+  const authErrSanitized = sanitizeFirebaseError({ code: 'messaging/authentication-error' });
+  assert(authErrSanitized.code === 'AUTHENTICATION_ERROR', 'Sanitized code for auth error is AUTHENTICATION_ERROR');
+  assert(!authErrSanitized.message.includes('AIzaSy'), 'Sanitized message contains no credential leakage');
+
+  const unregErrSanitized = sanitizeFirebaseError({ code: 'messaging/registration-token-not-registered' });
+  assert(unregErrSanitized.code === 'UNREGISTERED_TOKEN', 'Sanitized code for unregistered token is UNREGISTERED_TOKEN');
+  assert(unregErrSanitized.isInvalidToken === true, 'isInvalidToken flag set to true');
+
+  const transientErrSanitized = sanitizeFirebaseError({ code: 'messaging/server-unavailable' });
+  assert(transientErrSanitized.code === 'TRANSIENT_FAILURE', 'Sanitized code for server-unavailable is TRANSIENT_FAILURE');
+  assert(transientErrSanitized.isTransient === true, 'isTransient flag set to true');
+
+  const secretErrSanitized = sanitizeFirebaseError({
+    message: 'Error calling https://fcm.googleapis.com with key AIzaSyFakeSecretKey123456789',
+  });
+  assert(!secretErrSanitized.message.includes('AIzaSyFakeSecretKey'), 'Arbitrary error message with secret is sanitized');
+  assert(secretErrSanitized.code === 'FCM_SEND_FAILURE', 'Sanitized error code is FCM_SEND_FAILURE');
+
+  // 19. Extended: HTTP 404 and NOT_FOUND error sanitization triggers token invalidation
+  const notFoundSanitized = sanitizeFirebaseError({ status: 404, message: 'Requested entity was not found.' });
+  assert(notFoundSanitized.code === 'UNREGISTERED_TOKEN', 'HTTP 404 sanitized to UNREGISTERED_TOKEN');
+  assert(notFoundSanitized.isInvalidToken === true, 'HTTP 404 sets isInvalidToken to true');
+
+  // 20. Extended: Malformed JSON to PUT /api/v1/gateway/push-token returns 400
+  const malformedJsonReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw, 'content-type': 'application/json' },
+    body: '{"invalid-json": ',
+  });
+  const malformedJsonRes = await registerPushTokenRoute(malformedJsonReq);
+  assert(malformedJsonRes.status === 400, 'Malformed JSON request body returns HTTP 400 Bad Request');
+
+  // 21. Extended: Invalid app_version type returns 400
+  const invalidAppVerReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+    body: {
+      token: 'fcm_token_valid_length_abcdef12345',
+      provider: 'FCM',
+      platform: 'ANDROID',
+      app_version: 12345, // invalid type
+    },
+  });
+  const invalidAppVerRes = await registerPushTokenRoute(invalidAppVerReq);
+  assert(invalidAppVerRes.status === 400, 'Invalid app_version type returns HTTP 400 Bad Request');
+
+  const oversizedAppVerReq = makeRequest('http://localhost:3000/api/v1/gateway/push-token', {
+    method: 'PUT',
+    headers: { 'x-gateway-key': phase2GatewayKeyRaw },
+    body: {
+      token: 'fcm_token_valid_length_abcdef67890',
+      provider: 'FCM',
+      platform: 'ANDROID',
+      app_version: '123456789012345678901',
+    },
+  });
+  const oversizedAppVerRes = await registerPushTokenRoute(oversizedAppVerReq);
+  assert(oversizedAppVerRes.status === 400, 'app_version longer than database VARCHAR(20) is rejected');
+
+  const invalidArgumentSanitized = sanitizeFirebaseError({ code: 'messaging/invalid-argument' });
+  assert(invalidArgumentSanitized.code === 'INVALID_ARGUMENT', 'Ambiguous Firebase invalid-argument has a distinct sanitized code');
+  assert(invalidArgumentSanitized.isInvalidToken === false, 'Firebase invalid-argument does not revoke a potentially valid device token');
+
+  const futureOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(futureOutboxId, {
+    id: futureOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'FAILED',
+    attempts: 1,
+    max_attempts: 5,
+    next_attempt_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: new Date().toISOString(),
+  });
+  const futureDispatchRes = await PushService.dispatchOutboxItem(futureOutboxId);
+  assert(futureDispatchRes.status === 'SKIPPED', 'Outbox retry is not claimed before next_attempt_at');
+
+  const staleOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(staleOutboxId, {
+    id: staleOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PROCESSING',
+    attempts: 1,
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    last_attempt_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+    created_at: new Date().toISOString(),
+  });
+  await PushTokenService.registerToken(phase2GatewayId, {
+    token: 'fcm_token_stale_recovery_valid_12345',
+    provider: 'FCM',
+    platform: 'ANDROID',
+  });
+  mockMessaging.send = async () => 'projects/swift-test/messages/msg-stale-recovered';
+  const staleDispatchRes = await PushService.dispatchOutboxItem(staleOutboxId);
+  assert(staleDispatchRes.status === 'SENT', 'Stale PROCESSING outbox lease is reclaimed after interrupted invocation');
+
+  // 22. Extended: Ambiguous gateway selection when multiple gateways are enabled
+  // Enable Gateway 2 alongside Gateway 1 and give both valid tokens
+  store.gateways.get(phase2GatewayId)!.worker_enabled = true;
+  store.gateways.get(phase2GatewayId2)!.worker_enabled = true;
+  await PushTokenService.registerToken(phase2GatewayId, {
+    token: 'fcm_token_gw1_ambig_test_11111',
+    provider: 'FCM',
+    platform: 'ANDROID',
+  });
+  await PushTokenService.registerToken(phase2GatewayId2, {
+    token: 'fcm_token_gw2_ambig_test_22222',
+    provider: 'FCM',
+    platform: 'ANDROID',
+  });
+
+  const ambigPhone = '+919888877776';
+  const ambigSendRes = await OtpService.sendOtp(project, { phone: ambigPhone });
+  assert(ambigSendRes.status === 200, 'Ambiguous gateways sendOtp returns 200 OK to client');
+  const ambigChallengeId = (ambigSendRes.body as any).request_id;
+  const ambigSmsJob = Array.from(store.smsJobs.values()).find((j) => j.challenge_id === ambigChallengeId);
+  assert(ambigSmsJob?.status === 'QUEUED', 'Ambiguous state: durable SMS job remains safely QUEUED in database');
+  const ambigOutbox = Array.from(store.notificationOutbox.values()).find((o) => o.job_id === ambigSmsJob?.id);
+  assert(ambigOutbox?.status === 'FAILED', 'Ambiguous state: outbox record marked FAILED');
+  assert(ambigOutbox?.response_code === 'AMBIGUOUS_GATEWAY_SELECTION', 'Outbox response_code is AMBIGUOUS_GATEWAY_SELECTION');
+
+  // Disable Gateway 2 again to restore clean single-gateway state
+  store.gateways.get(phase2GatewayId2)!.worker_enabled = false;
+
+  // 23. Extended: Outbox transition to DEAD_LETTER after max delivery attempts
+  const deadLetterOutboxId = crypto.randomUUID();
+  store.notificationOutbox.set(deadLetterOutboxId, {
+    id: deadLetterOutboxId,
+    gateway_id: phase2GatewayId,
+    job_id: null,
+    channel: 'FCM',
+    priority: 'HIGH',
+    payload: { type: 'JOBS_AVAILABLE' },
+    status: 'PENDING',
+    attempts: 4, // Next attempt will be 5, reaching max_attempts 5
+    max_attempts: 5,
+    next_attempt_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  });
+
+  mockMessaging.send = async () => {
+    const err: any = new Error('Persistent transient failure');
+    err.code = 'messaging/server-unavailable';
+    throw err;
+  };
+
+  const deadLetterRes = await PushService.dispatchOutboxItem(deadLetterOutboxId);
+  assert(deadLetterRes.status === 'DEAD_LETTER', 'Exceeded maximum delivery attempts transitions outbox to DEAD_LETTER');
+  assert(deadLetterRes.responseCode === 'MAX_ATTEMPTS_EXCEEDED', 'Dead letter response code is MAX_ATTEMPTS_EXCEEDED');
+  const deadLetterOutboxAfter = store.notificationOutbox.get(deadLetterOutboxId);
+  assert(deadLetterOutboxAfter?.status === 'DEAD_LETTER', 'Outbox item persisted status is DEAD_LETTER');
+
+  // Reset Firebase mock state after test suite
+  resetFirebaseAdminState();
+
 
 
   console.log('\n===============================================================');
