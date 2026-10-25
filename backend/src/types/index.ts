@@ -258,9 +258,71 @@ export interface NotificationOutboxItem {
   next_attempt_at: Date;
   response_code?: string | null;
   error_message?: string | null;
+  lease_expires_at?: Date | null;
   deduplication_key?: string | null;
   created_at: Date;
   sent_at?: Date | null;
+}
+
+export interface OutboxBatchDispatchResponse {
+  success: boolean;
+  counts: {
+    claimed: number;
+    sent: number;
+    failed: number;
+    dead_letter: number;
+  };
+  duration_ms: number;
+}
+
+export interface OutboxHealthResponse {
+  success: boolean;
+  timestamp: string;
+  data: {
+    outbox: {
+      counts: {
+        pending: number;
+        processing: number;
+        sent: number;
+        failed: number;
+        dead_letter: number;
+      };
+      oldest_due_age_seconds: number | null;
+      dead_letter_count: number;
+      last_wake: {
+        timestamp: string | null;
+        status: string | null;
+        response_code: string | null;
+        age_seconds: number | null;
+      } | null;
+    };
+    tokens: {
+      active: number;
+      invalid: number;
+      gateways_with_active_token: number;
+    };
+    gateways: {
+      total_active: number;
+      online: number;
+      most_recent_seen_at: string | null;
+    };
+    sms_jobs: {
+      queued: number;
+      claimed: number;
+    };
+  };
+}
+
+export interface RetryDeadLetterRequest {
+  outbox_id?: string;
+  outbox_ids?: string[];
+  project_id?: string;
+}
+
+export interface RetryDeadLetterResponse {
+  success: boolean;
+  retried_count: number;
+  retried_ids: string[];
 }
 
 export interface RegisterPushTokenRequest {

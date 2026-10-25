@@ -168,6 +168,127 @@ async function main() {
     console.log('  ✅ Migration 006 invariant test data cleaned up.\n');
   }
 
+  // Step 3d: Migration 007 (Phase 4 Outbox Leases & Recovery)
+  const migration007Path = path.join(rootDir, 'database', '007_phase4_outbox_recovery.sql');
+  if (fs.existsSync(migration007Path)) {
+    console.log('Applying Migration 007 (database/007_phase4_outbox_recovery.sql)...');
+    const migration007Sql = sanitizeForPglite(fs.readFileSync(migration007Path, 'utf-8'));
+    await db.exec(migration007Sql);
+    console.log('  ✅ Migration 007 applied successfully.\n');
+
+    console.log('Verifying Migration 007 Invariants (leases, partial indexes & recovery)...');
+
+    // 1. Verify lease_expires_at column exists
+    const colCheck = await db.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'notification_outbox' AND column_name = 'lease_expires_at'`
+    );
+    if (colCheck.rows.length === 0) {
+      throw new Error('Migration 007 failed: lease_expires_at column missing');
+    }
+    console.log('  ✅ Invariant Verified: lease_expires_at column exists');
+
+    // 2. Verify partial indexes exist
+    const idxCheck = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+       WHERE tablename = 'notification_outbox'
+         AND indexname IN ('idx_notification_outbox_due', 'idx_notification_outbox_stale_leases')`
+    );
+    if (idxCheck.rows.length < 2) {
+      throw new Error('Migration 007 failed: partial indexes not found in pg_indexes');
+    }
+    console.log('  ✅ Invariant Verified: partial indexes created (idx_notification_outbox_due, idx_notification_outbox_stale_leases)');
+
+    // 3. Verify atomic stale lease recovery
+    const staleOutboxRes = await db.query<{ id: string }>(
+      `INSERT INTO notification_outbox (
+         channel, priority, payload, status, attempts, next_attempt_at, lease_expires_at, deduplication_key
+       ) VALUES (
+         'FCM', 'HIGH', '{"type":"JOBS_AVAILABLE"}'::jsonb, 'PROCESSING', 1, NOW(), NOW() - INTERVAL '10 seconds', 'test_lease_stale_1'
+       ) RETURNING id`
+    );
+    const staleId = staleOutboxRes.rows[0].id;
+
+    const reclaimRes = await db.query<{ id: string; attempts: number }>(
+      `UPDATE notification_outbox
+       SET status = 'PROCESSING',
+           lease_expires_at = NOW() + INTERVAL '30 seconds',
+           attempts = attempts + 1
+       WHERE id = $1
+         AND (
+           (status IN ('PENDING', 'FAILED') AND next_attempt_at <= NOW())
+           OR
+           (status = 'PROCESSING' AND lease_expires_at <= NOW())
+         )
+       RETURNING id, attempts`,
+      [staleId]
+    );
+
+    if (reclaimRes.rows.length !== 1 || reclaimRes.rows[0].attempts !== 2) {
+      throw new Error('Migration 007 failed: Stale PROCESSING lease could not be reclaimed');
+    }
+    console.log('  ✅ Invariant Verified: Stale PROCESSING lease successfully reclaimed');
+
+    // 4. Verify unexpired lease is protected from concurrent claim
+    const unexpiredClaim = await db.query(
+      `UPDATE notification_outbox
+       SET status = 'PROCESSING',
+           lease_expires_at = NOW() + INTERVAL '30 seconds',
+           attempts = attempts + 1
+       WHERE id = $1
+         AND (
+           (status IN ('PENDING', 'FAILED') AND next_attempt_at <= NOW())
+           OR
+           (status = 'PROCESSING' AND lease_expires_at <= NOW())
+         )
+       RETURNING id`,
+      [staleId]
+    );
+    if (unexpiredClaim.rows.length !== 0) {
+      throw new Error('Migration 007 failed: Active unexpired lease was improperly reclaimed');
+    }
+    console.log('  ✅ Invariant Verified: Active unexpired lease cannot be reclaimed concurrently');
+
+    // 5. Verify batch FOR UPDATE SKIP LOCKED compatibility
+    const skipLockedRes = await db.query(
+      `WITH next_batch AS (
+         SELECT id FROM notification_outbox
+         WHERE status = 'PROCESSING' AND lease_expires_at > NOW()
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED
+       )
+       SELECT id FROM next_batch`
+    );
+    if (skipLockedRes.rows.length !== 1) {
+      throw new Error('Migration 007 failed: FOR UPDATE SKIP LOCKED query failed on PGlite');
+    }
+    console.log('  ✅ Invariant Verified: FOR UPDATE SKIP LOCKED executes cleanly on PGlite');
+
+    // 6. Verify single outbox per job/channel constraint remains active
+    const tempPId = '00000000-0000-4000-8000-000000000301';
+    const tempJId = '00000000-0000-4000-8000-000000000302';
+    await db.query(`INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)`, [tempPId, 'P7', 'p7-test']);
+    await db.query(`INSERT INTO sms_jobs (id, project_id, phone_number, message, status) VALUES ($1, $2, '+919999999999', 'M', 'QUEUED')`, [tempJId, tempPId]);
+    await db.query(`INSERT INTO notification_outbox (job_id, channel, payload, status) VALUES ($1, 'FCM', '{}'::jsonb, 'PENDING')`, [tempJId]);
+
+    let dupViolation = false;
+    try {
+      await db.query(`INSERT INTO notification_outbox (job_id, channel, payload, status) VALUES ($1, 'FCM', '{}'::jsonb, 'PENDING')`, [tempJId]);
+    } catch (e: any) {
+      if (e.message.includes('idx_notification_outbox_job_channel')) dupViolation = true;
+    }
+    if (!dupViolation) {
+      throw new Error('Migration 007 broke idx_notification_outbox_job_channel invariant');
+    }
+    console.log('  ✅ Invariant Verified: idx_notification_outbox_job_channel remains strictly enforced');
+
+    // Cleanup 007 test fixtures
+    await db.query(`DELETE FROM notification_outbox WHERE id = $1 OR job_id = $2`, [staleId, tempJId]);
+    await db.query(`DELETE FROM sms_jobs WHERE id = $1`, [tempJId]);
+    await db.query(`DELETE FROM projects WHERE id = $1`, [tempPId]);
+    console.log('  ✅ Migration 007 test data cleaned up.\n');
+  }
+
   // Step 4: Execute Invariant Verification Suite
   console.log('Executing Invariant Verification Suite (database/test_phase1_invariants.sql)...');
   const testSql = fs.readFileSync(testScriptPath, 'utf-8');
