@@ -20,9 +20,9 @@ During the transition (Phases 1 through 4), the Android application will support
                             ▼               ▼
       ┌──────────────────────────┐    ┌──────────────────────────┐
       │  Legacy Inbound Server   │    │  Global Outbound Worker  │
-      │  - NanoHTTPD Port 8080   │    │  - Polling Engine        │
-      │  - LAN / Tunnel ingress  │    │  - No open ports         │
-      │  - Local key validation  │    │  - Global Backend API    │
+      │  - NanoHTTPD Port 8080   │    │  - Event-driven FCM wake │
+      │  - LAN / Tunnel ingress  │    │  - Periodic recovery     │
+      │  - Local key validation  │    │  - No open ports         │
       └──────────────────────────┘    └──────────────────────────┘
 ```
 
@@ -33,7 +33,7 @@ During the transition (Phases 1 through 4), the Android application will support
    - Preserves compatibility for quick offline testing or direct LAN integrations.
 2. **`GLOBAL_WORKER` (Production Target Mode):**
    - Disables local HTTP listener completely (freeing port 8080 and eliminating inbound attack surface).
-   - Starts the outbound polling worker connecting to the Global Backend on Vercel.
+   - Uses outbound HTTPS, an FCM wake signal, and periodic WorkManager recovery to connect to the global backend.
    - Authenticates using `otp_gw_live_*` gateway credentials.
 
 ---
@@ -65,3 +65,14 @@ Once the Global Backend is deployed and the Android Gateway Worker is validated:
   - The Android app can immediately be toggled back to `LOCAL_API` mode.
   - Client applications can temporarily utilize local fallback endpoints if necessary.
 - The existing codebase structure is strictly preserved to ensure seamless reversion if required.
+
+---
+
+## 5. Phase 5 Database Hardening Migrations
+
+### 5.1 Migration 008: Composite Rate-Limiting Indexes
+Migration `database/008_phase5_hardening.sql` introduces composite B-tree indexes to optimize transactional rate-limiting queries during high-concurrency burst traffic:
+- `idx_otp_challenges_phone_created` on `(project_id, phone_number, created_at DESC)`
+- `idx_otp_challenges_project_created` on `(project_id, created_at DESC)`
+
+These indexes support rate-limit queries while PostgreSQL advisory locks serialize quota decisions. Actual latency depends on database size, cache state, region, plan, and load; the PGlite migration test verifies structure rather than production latency.

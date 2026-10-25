@@ -204,3 +204,52 @@ Send errors commonly use a string `error`; verify errors use an object. Do not a
 6. Rotate a project key by issuing a replacement, updating your backend, then revoking the old key.
 
 The owner password is never an API credential and is not included in this guide.
+
+---
+
+## 5. Official Swift Client Reference Adapter
+
+For Node.js, Next.js, and TypeScript backends, use the official `SwiftClient` adapter:
+
+```typescript
+import { randomUUID } from 'node:crypto';
+import { SwiftClient, VerificationSessionStore } from '@/lib/client/swift-client';
+
+const swift = new SwiftClient({
+  baseUrl: process.env.SWIFT_BASE_URL!,
+  projectKey: process.env.SWIFT_PROJECT_KEY!,
+  timeoutMs: 5000,
+  maxRetries: 2,
+});
+
+// Demonstration only. Use PostgreSQL/Redis or your existing durable session
+// store in a serverless production application.
+const sessionStore = new VerificationSessionStore();
+
+// 1. Send OTP
+const sessionId = randomUUID();
+const idempotencyKey = randomUUID();
+const phone = '+919876543210';
+const sendResult = await swift.sendOtp({ phone, idempotencyKey });
+sessionStore.createSession(
+  sessionId,
+  phone,
+  sendResult.requestId,
+  idempotencyKey,
+  sendResult.expiresInSeconds,
+  sendResult.resendAfterSeconds
+);
+
+// 2. Verify OTP (Server-Side Bound)
+const session = sessionStore.getSession(sessionId);
+if (!session) throw new Error('Verification session is missing, expired, or consumed');
+const verifyResult = await swift.verifyOtp({
+  phone: session.phone,
+  requestId: session.swiftRequestId,
+  otp: userEnteredCode,
+});
+
+if (verifyResult.verified) {
+  sessionStore.consumeSession(sessionId);
+}
+```

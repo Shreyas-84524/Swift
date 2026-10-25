@@ -198,7 +198,7 @@ This checklist provides step-by-step physical test verification procedures for o
 - **Pre-condition:** An outbox item exceeds 5 maximum delivery attempts (status moves to `DEAD_LETTER`).
 - **Action:**
   1. Inspect `GET /api/v1/admin/outbox/health`.
-  2. Confirm `dead_letter_count >= 1` and zero PII (no phone numbers, OTPs, or keys) present in telemetry.
+  2. Confirm `data.outbox.dead_letter_count >= 1` and zero PII (no phone numbers, OTPs, or keys) in the health response.
   3. Execute authenticated recovery:
      ```bash
      curl -X POST https://<domain>/api/v1/admin/outbox/dead-letter/retry \
@@ -210,3 +210,17 @@ This checklist provides step-by-step physical test verification procedures for o
   - Endpoint returns `{"success": true, "retried_count": 1}`.
   - Outbox status transitions back to `PENDING` with `attempts = 0`.
   - If the underlying SMS job was already `SENT` or `DELIVERED`, retry is safely skipped.
+
+---
+
+## 7. TRAI / Telecom Regulatory Limits & Physical SIM Care
+
+1. **Consumer-SIM tariff and anti-spam controls**:
+   - The historic TRAI rule is not a universal hard block at 100 SMS. It limits concessional pricing; messages beyond the threshold may be charged at a higher floor tariff, subject to the subscriber's current plan and carrier controls.
+   - Do not rotate consumer SIMs to evade limits. Confirm the operator's terms and obtain an appropriate enterprise/M2M or registered messaging arrangement before production use.
+
+2. **Carrier Anti-Spam Heuristics**:
+   - Carriers may throttle or suspend traffic they classify as abusive or unregistered. Exact thresholds and enforcement are carrier-specific and must not be represented as guaranteed constants.
+   - Dynamic placeholders do not bypass DLT/template matching or carrier anti-spam controls.
+
+For bulk OTP, transactional, service, or commercial messaging, consult TRAI's current sender guidance and the access provider's Code of Practice. Registration as a Principal Entity, assignment of a header, registration of the content template, and transmission of the PE/header/content identifiers may be required.

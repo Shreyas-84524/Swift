@@ -122,8 +122,32 @@ To ensure zero duplicate SMS transmissions across multiple gateway devices:
 
 | Threat | Attack Vector | Mitigation Strategy |
 | :--- | :--- | :--- |
-| **Brute Force OTP** | Automated guessing of 6-digit OTP | Max 3 attempts per challenge + 5-minute expiry + IP rate limiting |
+| **Brute Force OTP** | Automated guessing of 6-digit OTP | Atomic maximum-attempt enforcement, short expiry, phone cooldown, and project quotas; integrating applications should additionally apply user/IP controls |
 | **SIM Flooding / Cost Exhaustion** | Rapid requests to single or many phone numbers | Per-phone rate limit (1 OTP / 60s), per-project hourly quotas |
 | **Gateway Impersonation** | Attacker trying to drain SMS queue | Dedicated `otp_gw_live_*` key with SHA-256 hash lookup |
-| **Eavesdropping on Phone** | Inbound network interception | Zero inbound open ports; pure outbound TLS 1.3 encryption |
+| **Eavesdropping on Phone** | Inbound network interception | Global-worker mode opens no inbound port and uses outbound HTTPS; TLS version is determined by the deployed client/server platform |
 | **Database Compromise** | Exposure of DB backup containing OTPs | OTPs are stored as SHA-256 salted hashes; raw tokens cannot be read |
+
+---
+
+## 8. Phase 5 Security Hardening & Zero-PII Guarantees
+
+1. **PostgreSQL Concurrency Advisory Locking**:
+   - `RateLimiter.acquireSendLocks` acquires project-level and recipient-level transaction advisory locks in a stable order.
+   - This serializes quota decisions across different recipients in one project and serializes cooldown/idempotency decisions for the same recipient. Production PostgreSQL concurrency remains a deployment acceptance test; PGlite tests exercise the transaction logic but use a serialized in-process connection harness.
+
+2. **Zero-PII Push Payloads**:
+   - FCM wake signals contain strictly `{"type": "JOBS_AVAILABLE"}`.
+   - Plaintext phone numbers, OTP codes, and SMS message bodies are strictly forbidden in push payloads.
+
+3. **Android Client-Side Hardening**:
+   - `android:allowBackup="false"` in `AndroidManifest.xml` prevents Keystore corruption and unauthorized extraction of gateway credentials via `adb backup`.
+   - Unused `READ_CONTACTS` permission removed.
+   - The release build enables R8 minification, and Proguard assumes no side effects for `android.util.Log`, stripping log statements from optimized release output.
+   - Secret key prefixes stripped from authentication log outputs.
+
+4. **Payload Size Guardrails**:
+   - OTP send/verify and gateway body endpoints enforce a 10KB limit against the actual UTF-8 body, including requests without a trustworthy `Content-Length` header.
+
+5. **Production Template Gate**:
+   - Production OTP dispatch requires an approved and active template version. Legacy project-config and built-in fallback messages are development-only.

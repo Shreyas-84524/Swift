@@ -183,7 +183,7 @@ Phase 1 introduces the backend foundations for editable message templates and ev
 
 ### 6.2 Push Notification Foundation (Readiness for Phase 2)
 - **Token Registry (`gateway_push_tokens`):** Stores FCM/HMS/APNS device tokens per gateway with platform and fingerprint metadata.
-- **Transactional Outbox (`notification_outbox`):** Implements the Transactional Outbox pattern so that when an SMS job is enqueued, a wake notification can be scheduled atomically with guaranteed delivery.
+- **Transactional Outbox (`notification_outbox`):** Ensures the durable wake record is committed atomically with the SMS job. Delivery remains retryable and observable; it is not guaranteed when external services or the gateway are unavailable.
 - **Zero Disruption to Phase 1 Android Execution:** Polling on Android devices continues unchanged while backend tables, admin APIs, and validation systems are primed for push activation in Phase 2.
 
 ---
@@ -246,3 +246,19 @@ FCM messages are strictly wake-up triggers, never job carriers.
   }
   ```
 - **Privacy & Security Guarantee:** The payload contains **ZERO** OTP codes, phone numbers, recipient metadata, SMS message text, or API credentials.
+
+---
+
+## 9. Phase 5 Production Integration & Client Session Binding
+
+### 9.1 Server-Side Verification Session Binding
+To eliminate phone-tampering vulnerabilities where an attacker attempts to verify an OTP issued for Phone A using Phone B:
+1. When calling `POST /api/v1/otp/send`, the client or server adapter persists the challenge session binding: `phone`, `request_id`, and `idempotency_key`.
+2. When calling `POST /api/v1/otp/verify`, the backend verifies that the `phone` matches the challenge's `phone_number` in PostgreSQL.
+3. The TypeScript reference adapter includes a demonstration `VerificationSessionStore`. Its in-memory implementation is for tests and single-process examples only; production/serverless consumers must persist the same fields in a durable database or session store.
+
+### 9.2 Single-Flight Android Drain Mutex
+The Android Gateway Worker executes a single-flight mutex with an in-flight set:
+- If a wake arrives while a queue drain is active, a pending signal is set.
+- Individual jobs in flight are deduplicated via an in-memory set.
+- Before transmitting to the cellular modem, the local Room SQLite cache is checked to ensure no duplicate SMS is sent to the carrier.

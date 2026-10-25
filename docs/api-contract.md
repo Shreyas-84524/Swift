@@ -252,29 +252,30 @@ Public or authenticated health probe for uptime monitors and status badges.
 
 ### 5.1 Create Project
 - **Method:** `POST`
-- **Path:** `/api/v1/projects`
-- **Auth:** `X-Admin-Key`
+- **Path:** `/api/v1/admin/projects`
+- **Auth:** Authenticated owner session with CSRF/origin validation
+- **Configuration:** `cooldown_seconds` (10–3600), `hourly_limit` per phone (1–100), `project_hourly_limit` (1–10000, default 100), and `expiry_seconds` (60–1800).
 
 ### 5.2 Generate Project API Key
 - **Method:** `POST`
-- **Path:** `/api/v1/projects/{projectId}/keys`
-- **Auth:** `X-Admin-Key`
+- **Path:** `/api/v1/admin/projects/{projectId}/keys`
+- **Auth:** Authenticated owner session with CSRF/origin validation
 - **Response:** Returns the newly generated plaintext key ONCE along with its prefix and ID.
 
 ### 5.3 Revoke Project API Key
 - **Method:** `DELETE`
-- **Path:** `/api/v1/projects/{projectId}/keys/{keyId}`
-- **Auth:** `X-Admin-Key`
+- **Path:** `/api/v1/admin/project-keys/{keyId}`
+- **Auth:** Authenticated owner session with CSRF/origin validation
 
 ### 5.4 Generate Gateway API Key
 - **Method:** `POST`
-- **Path:** `/api/v1/gateway/keys`
-- **Auth:** `X-Admin-Key`
+- **Path:** `/api/v1/admin/gateways/{gatewayId}/keys`
+- **Auth:** Authenticated owner session with CSRF/origin validation
 
 ### 5.5 Revoke Gateway API Key
 - **Method:** `DELETE`
-- **Path:** `/api/v1/gateway/keys/{keyId}`
-- **Auth:** `X-Admin-Key`
+- **Path:** `/api/v1/admin/gateway-keys/{keyId}`
+- **Auth:** Authenticated owner session with CSRF/origin validation
 
 ---
 
@@ -647,5 +648,81 @@ Allows administrative re-dispatch of stalled or dead-lettered wake signals.
   "success": true,
   "retried_count": 1,
   "retried_ids": ["outbox_uuid_123"]
+}
+```
+
+---
+
+## 5. Internal Scheduler & Outbox Dispatcher Endpoints
+
+### 5.1 Trigger Batch Outbox Recovery Dispatch
+Atomically claims and dispatches due or stale notification outbox records to Firebase Cloud Messaging.
+
+- **Method:** `POST` or `GET`
+- **Path:** `/api/v1/internal/outbox/dispatch`
+- **Auth:** `Authorization: Bearer <OUTBOX_SCHEDULER_SECRET>` or `Authorization: Bearer <CRON_SECRET>`
+- **Security:** Credentials in query parameters are strictly rejected with HTTP 400.
+
+#### Request Query Parameters (Optional)
+- `batch_size`: Integer (1–50, default: 25)
+- `max_time_ms`: Integer (100–30000, default: 10000)
+
+#### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "counts": {
+    "claimed": 3,
+    "sent": 3,
+    "failed": 0,
+    "dead_letter": 0
+  },
+  "duration_ms": 142
+}
+```
+
+---
+
+## 6. Admin Observability & Dead-Letter Recovery Endpoints
+
+### 6.1 Outbox & Gateway Telemetry Health
+- **Method:** `GET`
+- **Path:** `/api/v1/admin/outbox/health`
+- **Auth:** Admin owner session cookie required
+- **Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "timestamp": "2026-10-26T00:00:00.000Z",
+  "data": {
+    "outbox": {
+      "counts": { "pending": 0, "processing": 0, "sent": 3, "failed": 0, "dead_letter": 0 },
+      "oldest_due_age_seconds": null,
+      "dead_letter_count": 0,
+      "last_wake": null
+    },
+    "tokens": { "active": 1, "invalid": 0, "gateways_with_active_token": 1 },
+    "gateways": { "total_active": 1, "online": 1, "most_recent_seen_at": "2026-10-26T00:00:00.000Z" },
+    "sms_jobs": { "queued": 0, "claimed": 0 }
+  }
+}
+```
+
+### 6.2 Retry Dead-Letter Outbox Records
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/outbox/dead-letter/retry`
+- **Auth:** Admin owner session cookie required (CSRF protection enforced)
+- **Request Body:**
+```json
+{
+  "outbox_ids": ["8f9c2d1b-7a6e-4f3c-8000-000000000001"]
+}
+```
+- **Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "retried_count": 1,
+  "retried_ids": ["8f9c2d1b-7a6e-4f3c-8000-000000000001"]
 }
 ```

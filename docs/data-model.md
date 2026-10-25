@@ -172,7 +172,7 @@ Represents client applications (e.g., CivicFix, Hostix).
 - `name` (VARCHAR(100), NOT NULL): Human-readable name.
 - `slug` (VARCHAR(50), UNIQUE, NOT NULL): URL-safe identifier (e.g., `civicfix`).
 - `enabled` (BOOLEAN, DEFAULT TRUE): Master switch for project access.
-- `config` (JSONB, DEFAULT '{}'): Rate limit overrides, default OTP expiry, templates.
+- `config` (JSONB, DEFAULT '{}'): Rate-limit and OTP settings. Supported keys include `cooldown_seconds`, per-phone `hourly_limit`, project-wide `project_hourly_limit` (default 100), `expiry_seconds`, `max_attempts`, and `otp_length`. Legacy template keys are development-only; production dispatch requires an approved active template version.
 - `created_at` (TIMESTAMPTZ, DEFAULT NOW()).
 - `updated_at` (TIMESTAMPTZ, DEFAULT NOW()).
 
@@ -390,3 +390,7 @@ To guarantee zero cross-template version corruption and enforce bidirectional st
 3. **Pre-flight Sanitization & Audit Columns:**
    - Pre-flight cleanup in Migration 005 ensures every `ACTIVE` version that is not the deployed version of an `ACTIVE` parent template is demoted to `APPROVED`.
    - `message_template_versions` records `approved_by (VARCHAR(100))` and `approved_at (TIMESTAMPTZ)` populated on explicit owner approval, alongside `activated_at (TIMESTAMPTZ)`.
+
+### 4.6 Phase 5 Hardening Indexes (Migration 008)
+- `idx_otp_challenges_phone_created`: `CREATE INDEX idx_otp_challenges_phone_created ON otp_challenges (project_id, phone_number, created_at DESC);`
+- `idx_otp_challenges_project_created`: `CREATE INDEX idx_otp_challenges_project_created ON otp_challenges (project_id, created_at DESC);`

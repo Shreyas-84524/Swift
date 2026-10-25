@@ -1,5 +1,8 @@
 # Swift Setup Instructions
 
+> For production operations and deployment runbook, see [Phase 5 Production Runbook](docs/phase5-production-runbook.md) and [Phase 5 Human Actions Checklist](docs/phase5-human-actions.md).
+
+
 ## Prerequisites
 
 - Android device with Android 6.0 (API level 23) or higher

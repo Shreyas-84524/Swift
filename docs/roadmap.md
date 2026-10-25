@@ -2,7 +2,7 @@
 
 ## Overview
 
-The transformation of the standalone Android SMS gateway into a multi-tenant Swift is organized across five distinct phases.
+The transformation of the standalone Android SMS gateway into the current single-owner Swift platform is organized across six phases. Multi-user tenancy is explicitly deferred.
 
 ---
 
@@ -17,7 +17,7 @@ The transformation of the standalone Android SMS gateway into a multi-tenant Swi
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase 2: Global Cloud Backend & Database Implementation    │
+│ Phase 2: Global Cloud Backend & Database Implementation     │
 │ - Vercel TypeScript / Next.js Serverless Backend            │
 │ - PostgreSQL database migration & pooling setup             │
 │ - OTP generation, salted hashing, and challenge lifecycle   │
@@ -27,28 +27,35 @@ The transformation of the standalone Android SMS gateway into a multi-tenant Swi
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Phase 3: Android Gateway Worker Conversion                  │
-│ - Implement Outbound Polling Engine & Heartbeat             │
-│ - Adapt Foreground Service to work in GLOBAL_WORKER mode    │
+│ - Implement event-driven FCM wake and queue draining        │
+│ - Add WorkManager recovery for GLOBAL_WORKER mode           │
 │ - Integrate SMS status sync (SENT, DELIVERED, FAILED)       │
-│ - Offline buffering and adaptive backoff                    │
+│ - Offline recovery and bounded backoff                      │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase 4: Key Management & Admin/Gateway UI                  │
-│ - Admin dashboard & project credential provisioning         │
-│ - Android Gateway configuration UI (Key pairing, Sync)      │
-│ - Rate limiting, quotas, and alerting                       │
-│ - Observability & health monitoring dashboards              │
+│ Phase 4: Reliable Outbox Recovery & Operations              │
+│ - Leased recovery dispatcher and dead-letter workflow       │
+│ - Scheduler authentication and health observability         │
+│ - Android token resumption and retry hardening              │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase 5: CivicFix Integration & End-to-End Verification     │
-│ - CivicFix backend integration with Global OTP API          │
-│ - End-to-end verification (Auth flow -> SIM -> SMS delivery)│
-│ - Load & stress testing                                     │
-│ - Full documentation & production deployment                │
+│ Phase 5: Production Hardening, Verification & Release (Completed)│
+│ - End-to-end 20-edge-case failure simulation test suite     │
+│ - Atomic rate limiting with PostgreSQL advisory locking     │
+│ - Server-side session binding client reference SDK          │
+│ - Android release hardening (allowBackup=false, log strip)  │
+│ - Production deployment runbooks, live acceptance checklist │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 6: Android & Web UI/UX Refinement (Pending)           │
+│ - Android mobile application UI/UX overhaul                 │
+│ - Web admin portal interface polishing & analytics views    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +63,7 @@ The transformation of the standalone Android SMS gateway into a multi-tenant Swi
 
 ## Detailed Phase Breakdown
 
-### Phase 1: Architecture & Foundation (Current)
+### Phase 1: Architecture & Foundation (Completed)
 - [x] Create dedicated branch `global-otp-service`.
 - [x] Complete technical audit of Android codebase (`SmsManager`, Room DB, NanoHTTPD, `SmsGatewayService`).
 - [x] Author global architecture specification (`docs/architecture.md`).
@@ -68,30 +75,32 @@ The transformation of the standalone Android SMS gateway into a multi-tenant Swi
 - [x] Establish monorepo structure without breaking existing Gradle build.
 - [x] Verify Android compilation with `./gradlew assembleDebug`.
 
-### Phase 2: Cloud Backend & Database
-- Implement Vercel serverless TypeScript backend in `backend/`.
-- Deploy PostgreSQL schema on Supabase / Neon.
-- Implement `/api/v1/otp/send` and `/api/v1/otp/verify` with CSPRNG and SHA-256 salted hashing.
-- Implement `/api/v1/gateway/jobs` with atomic `SKIP LOCKED` job leasing.
-- Implement `/api/v1/gateway/jobs/{jobId}/status` and `/api/v1/health`.
-- Comprehensive backend unit and integration test suite.
+### Phase 2: Cloud Backend & Database (Completed)
+- [x] Implement the Next.js serverless backend in `backend/`.
+- [x] Add PostgreSQL schema and additive migration verification.
+- [x] Implement OTP send/verify and gateway queue/status APIs.
+- [x] Add transactional job/outbox creation and automated tests.
 
 ### Phase 3: Android Gateway Worker Conversion (Completed with Phase 3.1 Hardening)
 - [x] Add HTTP client library (OkHttp 4.12.0) and Jetpack Security (Keystore encrypted preferences).
-- [x] Implement outbound polling worker (`GlobalGatewayWorker`) inside `SmsGatewayService`.
+- [x] Implement event-driven queue draining with FCM and WorkManager recovery.
 - [x] Wire `SmsStatusReceiver` broadcast events to report back to backend status endpoint.
 - [x] Implement Android 15 (`targetSdk 35`) `Service.onTimeout` graceful termination to prevent FGS timeout crashes.
 - [x] Preserve legacy `LOCAL_API` mode switch for backward compatibility.
 
-### Phase 4: Key Management, Admin UI & Production Push Architecture
-- Implement Project API Key generation with SHA-256 hashing and prefix indexing.
-- Implement Gateway pairing workflow with one-time display credentials.
-- Build Android device settings screen for entering gateway backend URL and API key.
-- Evaluate & design event-driven FCM high-priority push wake mechanism for true 24/7 unattended production gateway operation without background polling timeouts.
-- Add quota enforcement and IP-based rate limiting.
+### Phase 4: Reliable Outbox Recovery & Production Push Architecture (Completed)
+- [x] Implement leased outbox recovery, bounded backoff, and dead-letter handling.
+- [x] Add authenticated scheduler and owner observability endpoints.
+- [x] Implement event-driven FCM high-priority wake with periodic Android recovery.
+- [x] Harden token resumption, WorkManager retry bounds, and single-flight draining.
 
-### Phase 5: CivicFix Integration & Production Release
-- Integrate CivicFix auth pipeline with `POST /api/v1/otp/send` and `POST /api/v1/otp/verify`.
-- Validate full live transmission cycle: User requests OTP in CivicFix $\to$ Global Backend $\to$ Android Worker $\to$ SIM $\to$ Cellular Carrier $\to$ User handset.
-- Verify fallback and timeout scenarios.
-- Release Android APK build and finalize production documentation.
+### Phase 5: Production Integration & Release Readiness (Completed in code; physical acceptance pending)
+- [x] Add a server-only TypeScript integration adapter and durable-session pattern.
+- [x] Harden concurrent quotas, idempotency, verification, request bounds, and production templates.
+- [x] Add mocked lifecycle/failure coverage and operational runbooks.
+- [ ] Complete the controlled physical FCM/SIM acceptance checklist and configure production services.
+
+### Phase 6: Android & Website UI/UX Refinement
+- Refine the existing Android gateway interface without changing delivery semantics.
+- Refine the owner website for responsive, accessible project, template, gateway, and outbox operations.
+- Add visual state handling, validation feedback, and release-quality polish.

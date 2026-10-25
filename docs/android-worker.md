@@ -249,3 +249,19 @@ Phase 4 introduces operational resilience against network drops, process death, 
 
 4. **Single-Flight In-Flight Mutex Deduplication:**
    - Concurrent drain requests from push wakes, periodic recovery, or UI sync are serialized through a single-flight `Mutex` and in-memory in-flight set, completely preventing concurrent duplicate carrier SMS dispatch.
+
+---
+
+## 6. Phase 5 Single-Flight Drain Mutex & Room Deduplication
+
+1. **Single-Flight Mutex**:
+   - `JobDrainEngine` utilizes an atomic boolean lock (`drainLock`).
+   - If a new FCM wake signal or WorkManager run triggers while draining is in progress, `pendingWorkSignal` is flagged.
+   - Upon completing the current batch, the worker inspects `pendingWorkSignal` and automatically continues until the queue is exhausted.
+
+2. **In-Flight Job Deduplication**:
+   - An in-memory concurrent set (`inFlightJobIds`) prevents race conditions between simultaneous polling and push wake events.
+
+3. **Room SQLite Cache Guard**:
+   - Before handing an SMS job to Android `SmsManager`, the local database is checked.
+   - If the job was already dispatched locally (`SENT` or `DELIVERED`), the modem dispatch is skipped and status is re-reported to the server.
