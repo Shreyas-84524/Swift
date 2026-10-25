@@ -52,7 +52,7 @@ class AuthenticationManager(context: Context) {
                 }
             }
             
-            Log.d(TAG, "Authentication successful for API key: ${apiKey.take(10)}...")
+            Log.d(TAG, "Authentication successful")
             return AuthResult(true)
             
         } catch (e: Exception) {

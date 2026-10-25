@@ -2263,6 +2263,16 @@ async function runAllTests() {
   };
   store.projects.set(cleanProjectId, cleanProject);
 
+  (process.env as any).NODE_ENV = 'production';
+  const productionWithoutActiveTemplate = await OtpService.sendOtp(cleanProject, {
+    phone: '+919222222221',
+  });
+  (process.env as any).NODE_ENV = 'test';
+  assert(
+    productionWithoutActiveTemplate.status === 422,
+    'Production rejects dispatch without an approved active template'
+  );
+
   const fallbackSendRes = await OtpService.sendOtp(cleanProject, {
     phone: '+919222222222',
   });

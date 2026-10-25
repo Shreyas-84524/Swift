@@ -35,3 +35,16 @@
 -keep class com.multi.encription.sms.models.** { *; }
 -keep class com.multi.encription.sms.network.** { *; }
 -keep class com.multi.encription.sms.database.** { *; }
+
+# ==========================================
+# Security: Strip android.util.Log in release builds
+# ==========================================
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+    public static int w(...);
+    public static int e(...);
+    public static int wtf(...);
+}

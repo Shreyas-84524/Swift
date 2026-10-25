@@ -9,10 +9,15 @@
     "start": "next start",
     "lint": "next lint",
     "test": "tsx tests/run-all-tests.ts",
+    "test:client": "tsx tests/client-adapter.test.ts",
+    "test:e2e": "tsx tests/e2e-lifecycle.test.ts",
+    "test:phase5-audit": "tsx tests/phase5-audit-hardening.test.ts",
     "test:pg-invariants": "tsx scripts/run-pg-migration-test.ts",
+    "test:owner": "tsx tests/owner-auth.test.ts",
+    "test:all": "tsx tests/run-all-tests.ts && tsx tests/client-adapter.test.ts && tsx tests/e2e-lifecycle.test.ts && tsx tests/phase5-audit-hardening.test.ts",
+    "outbox:dispatch": "tsx scripts/invoke-outbox-scheduler.ts",
     "admin": "tsx scripts/admin-cli.ts",
-    "owner:configure": "node scripts/provision-supabase-owner.cjs",
-    "test:owner": "tsx tests/owner-auth.test.ts"
+    "owner:configure": "node scripts/provision-supabase-owner.cjs"
   },
   "keywords": [
     "otp",
