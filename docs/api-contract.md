@@ -275,3 +275,139 @@ Public or authenticated health probe for uptime monitors and status badges.
 - **Method:** `DELETE`
 - **Path:** `/api/v1/gateway/keys/{keyId}`
 - **Auth:** `X-Admin-Key`
+
+---
+
+## 6. Message Templates & Push Foundation Endpoints (Phase 1)
+
+All endpoints in this section require Admin authentication via Supabase JWT session cookie or `Authorization: Bearer <token>`.
+
+### 6.1 List Templates for Project
+- **Method:** `GET`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates`
+- **Description:** Returns all templates for the given project, including their currently active version details.
+- **Success Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "templates": [
+    {
+      "id": "tpl_7f8a9b",
+      "project_id": "proj_123",
+      "name": "User Registration OTP",
+      "slug": "user-reg-otp",
+      "template_type": "OTP",
+      "status": "ACTIVE",
+      "active_version": {
+        "id": "ver_9a8b7c",
+        "version_number": 1,
+        "body": "Your {{app_name}} verification code is {{otp}}. Valid for {{expiry_minutes}} minutes.",
+        "variables": ["app_name", "otp", "expiry_minutes"],
+        "character_count": 81,
+        "segment_count": 1,
+        "encoding": "GSM_7",
+        "status": "ACTIVE"
+      }
+    }
+  ]
+}
+```
+
+### 6.2 Create Message Template
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates`
+- **Description:** Validates approved placeholders (`{{otp}}`, `{{app_name}}`, `{{expiry_minutes}}`), verifies safety, calculates character/segment metrics, and creates initial version v1 in `DRAFT` status. Direct creation as `ACTIVE` is forbidden (returns HTTP 400 `DIRECT_ACTIVE_FORBIDDEN`).
+- **Request Body:**
+```json
+{
+  "name": "Login OTP Template",
+  "slug": "login-otp",
+  "template_type": "OTP",
+  "body": "Your {{app_name}} OTP is {{otp}}. Valid for {{expiry_minutes}} mins.",
+  "dlt_template_id": "1107161234567890123",
+  "sender_header": "SWIFTG",
+  "pe_id": "1201159876543210987"
+}
+```
+- **Success Response (`201 Created`):** Returns the created template with `status: "DRAFT"` and version v1 with `status: "DRAFT"`.
+
+### 6.3 Get Template Details & Version History
+- **Method:** `GET`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}`
+- **Description:** Retrieves the template, its current active version (if `ACTIVE`), its latest version, and complete historical versions list ordered by `version_number DESC`.
+
+### 6.4 Update Template / Create New Version
+- **Method:** `PATCH`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}`
+- **Description:** Updates metadata (`name`, `description`, `dlt_template_id`, `sender_header`, `pe_id`). If `body` is provided and differs from latest version, creates a new `DRAFT` version (e.g. v2). If the template is currently `ACTIVE`, it remains live with its existing active version until the new draft version is explicitly approved and activated. Direct activation via update is rejected (returns HTTP 400).
+
+### 6.5 Approve Template Version
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}/approve`
+- **Description:** Explicit owner action to approve a `DRAFT` version before activation. Records `approved_by` and `approved_at` audit metadata.
+- **Request Body (optional):**
+```json
+{
+  "version_id": "ver_uuid_optional"
+}
+```
+- **Success Response (`200 OK`):** Returns updated template with target version in `APPROVED` status.
+
+### 6.6 Activate Template Version
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}/activate`
+- **Description:** Transitions template status to `ACTIVE`. Accepts **ONLY** an `APPROVED` version (rejects `DRAFT` with HTTP 409 `MUST_BE_APPROVED`, rejects `ARCHIVED` with HTTP 409 `ARCHIVED_TEMPLATE`). Records `activated_at`. Atomically demotes any previously active OTP templates and versions in the same project to `APPROVED`, enforcing exactly one active OTP template per project.
+- **Request Body (optional):**
+```json
+{
+  "version_id": "ver_uuid_optional"
+}
+```
+- **Success Response (`200 OK`):** Returns activated template with `active_version` populated.
+
+### 6.7 Archive Template
+- **Method:** `DELETE` on `/api/v1/admin/projects/{projectId}/templates/{templateId}` or `POST` on `/api/v1/admin/projects/{projectId}/templates/{templateId}/archive`
+- **Description:** Soft-deletes template and cascades `ARCHIVED` status to all its versions. Verifies project ownership inside a single transaction using `SELECT ... FOR UPDATE`. If `projectId` does not match, performs zero mutations and returns HTTP 404.
+- **Success Response (`200 OK`):** `{ "success": true, "message": "Template archived" }`
+
+
+### 6.7 Preview Template & Segment Estimation
+- **Method:** `POST`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/preview`
+- **Description:** Renders template text with sample variables, detects GSM 7-bit vs UCS-2 encoding, and calculates telecom segment counts according to 3GPP standards.
+- **Request Body:**
+```json
+{
+  "body": "Your {{app_name}} OTP is {{otp}}. Valid for {{expiry_minutes}} mins.",
+  "sample_variables": {
+    "app_name": "SwiftApp",
+    "otp": "839201",
+    "expiry_minutes": 5
+  }
+}
+```
+- **Success Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": {
+    "rendered_text": "Your SwiftApp OTP is 839201. Valid for 5 mins.",
+    "variables": {
+      "app_name": "SwiftApp",
+      "otp": "839201",
+      "expiry_minutes": "5"
+    },
+    "encoding": "GSM_7",
+    "character_count": 46,
+    "raw_length": 46,
+    "segment_count": 1,
+    "max_characters_per_segment": 160,
+    "remaining_in_current_segment": 114
+  }
+}
+```
+
+### 6.8 Preview Saved Template
+- **Method:** `GET` / `POST`
+- **Path:** `/api/v1/admin/projects/{projectId}/templates/{templateId}/preview`
+- **Description:** Renders and calculates telecom metrics for an existing saved template using its active version body and optional variable overrides.

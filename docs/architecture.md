@@ -152,3 +152,23 @@ This is completely eliminated because:
 1. The global backend is hosted on a public domain with automatic TLS managed by Vercel.
 2. The phone initiates outbound TLS connections (HTTPS GET/POST) to the backend.
 3. NAT traversal, dynamic IPs, and firewall traversal happen transparently over standard HTTPS outbound connections.
+
+---
+
+## 6. Phase 1 Foundations: Safe Message Templates & Push Readiness
+
+Phase 1 introduces the backend foundations for editable message templates and event-driven push delivery without altering current Android polling behavior.
+
+### 6.1 Safe Message Template Engine
+- **Strict Placeholder Whitelist:** Templates only permit approved placeholders: `{{otp}}`, `{{app_name}}`, and `{{expiry_minutes}}`. Any disallowed placeholder (e.g. `{{phone}}`, `{{token}}`, `${var}`) or unsafe input (null bytes, control characters, script tags, >500 characters) is rejected at validation.
+- **Telecom Segment Estimation:** Computes character counts and segment splits based on 3GPP TS 23.038 standards:
+  - **GSM 7-bit:** 160 characters per single SMS; 153 characters per segment for multipart messages. Extended characters (`[`, `]`, `{`, `}`, `^`, `~`, `|`, `\`, `€`) consume 2 septets.
+  - **UCS-2 (Unicode):** 70 characters per single SMS; 67 characters per segment for multipart messages.
+- **Single Active OTP Template:** Enforced at both database level (`CREATE UNIQUE INDEX ... WHERE template_type = 'OTP' AND status = 'ACTIVE'`) and application level (automatic atomic demotion of previous active template).
+- **Template Version History:** Updating a template's body creates an incremental version row in `message_template_versions`, maintaining auditability and rollback capability.
+- **DLT Regulatory Support:** Optional future-proof fields for Indian telecom regulations: `dlt_template_id`, `sender_header`, and `pe_id`.
+
+### 6.2 Push Notification Foundation (Readiness for Phase 2)
+- **Token Registry (`gateway_push_tokens`):** Stores FCM/HMS/APNS device tokens per gateway with platform and fingerprint metadata.
+- **Transactional Outbox (`notification_outbox`):** Implements the Transactional Outbox pattern so that when an SMS job is enqueued, a wake notification can be scheduled atomically with guaranteed delivery.
+- **Zero Disruption to Phase 1 Android Execution:** Polling on Android devices continues unchanged while backend tables, admin APIs, and validation systems are primed for push activation in Phase 2.

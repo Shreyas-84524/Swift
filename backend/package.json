@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "test": "tsx tests/run-all-tests.ts",
+    "test:pg-invariants": "tsx scripts/run-pg-migration-test.ts",
     "admin": "tsx scripts/admin-cli.ts",
     "owner:configure": "node scripts/provision-supabase-owner.cjs",
     "test:owner": "tsx tests/owner-auth.test.ts"
@@ -24,6 +25,9 @@
   ],
   "author": "",
   "license": "MIT",
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.11"
+  },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
