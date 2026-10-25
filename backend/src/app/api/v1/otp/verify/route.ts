@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateProject } from '@/lib/auth/middleware';
 import { OtpService } from '@/lib/otp/service';
+import { JsonBodyError, readBoundedJsonObject } from '@/lib/http/json-body';
 import { VerifyOtpRequest } from '@/types';
 
 export const dynamic = 'force-dynamic';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const auth = await authenticateProject(request);
@@ -12,12 +15,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const rawBody = (await request.json()) as Record<string, any>;
+    let rawBody: Record<string, unknown>;
+    try {
+      rawBody = await readBoundedJsonObject(request);
+    } catch (error) {
+      if (!(error instanceof JsonBodyError)) throw error;
+      return NextResponse.json(
+        {
+          success: false,
+          verified: false,
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        },
+        { status: error.statusCode }
+      );
+    }
+
     const phone = rawBody?.phone || rawBody?.phone_number;
     const requestId = rawBody?.request_id || rawBody?.challenge_id;
     const otp = rawBody?.otp || rawBody?.code;
 
-    if (!rawBody || !phone || !requestId || !otp) {
+    if (!phone || !requestId || !otp) {
       return NextResponse.json(
         {
           success: false,
@@ -31,10 +51,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    const trimmedPhone = String(phone).trim();
+    const trimmedRequestId = String(requestId).trim();
+    const trimmedOtp = String(otp).trim();
+
+    if (!UUID_REGEX.test(trimmedRequestId)) {
+      return NextResponse.json(
+        {
+          success: false,
+          verified: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'request_id must be a valid UUID',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!/^\d{4,10}$/.test(trimmedOtp)) {
+      return NextResponse.json(
+        {
+          success: false,
+          verified: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Verification code must be numeric with length between 4 and 10 digits',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     const payload: VerifyOtpRequest = {
-      phone,
-      request_id: requestId,
-      otp: String(otp).trim(),
+      phone: trimmedPhone,
+      request_id: trimmedRequestId,
+      otp: trimmedOtp,
     };
 
     const result = await OtpService.verifyOtp(auth.context.project, payload);
@@ -46,7 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           verified: true,
           data: {
             verified: true,
-            challenge_id: requestId,
+            challenge_id: trimmedRequestId,
             verified_at: new Date().toISOString(),
           },
         },
@@ -55,18 +107,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     return NextResponse.json(result.body, { status: result.status });
-  } catch (error) {
-    console.error('API Error /api/v1/otp/verify:', error);
+  } catch {
+    console.error('[API /api/v1/otp/verify] Internal error');
     return NextResponse.json(
       {
         success: false,
         verified: false,
         error: {
-          code: 'BAD_REQUEST',
-          message: 'Invalid JSON payload or internal error',
+          code: 'INTERNAL_ERROR',
+          message: 'Internal server error processing OTP verification',
         },
       },
-      { status: 400 }
+      { status: 500 }
     );
   }
 }

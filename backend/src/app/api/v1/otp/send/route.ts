@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateProject } from '@/lib/auth/middleware';
 import { OtpService } from '@/lib/otp/service';
+import { JsonBodyError, readBoundedJsonObject } from '@/lib/http/json-body';
 import { SendOtpRequest } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -12,29 +13,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const rawBody = (await request.json()) as Record<string, any>;
-    const phone = rawBody?.phone || rawBody?.phone_number;
+    let rawBody: Record<string, unknown>;
+    try {
+      rawBody = await readBoundedJsonObject(request);
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        return NextResponse.json({ error: error.message }, { status: error.statusCode });
+      }
+      throw error;
+    }
 
-    if (!rawBody || !phone) {
+    const phone = rawBody?.phone || rawBody?.phone_number;
+    if (!phone || typeof phone !== 'string') {
       return NextResponse.json(
-        { error: 'Field "phone" or "phone_number" is required' },
+        { error: 'Field "phone" or "phone_number" must be a non-empty string' },
         { status: 400 }
       );
     }
 
-    const idempotencyKey =
+    const trimmedPhone = phone.trim();
+    if (trimmedPhone.length < 8 || trimmedPhone.length > 20) {
+      return NextResponse.json(
+        { error: 'Phone number must be between 8 and 20 characters in valid E.164 format' },
+        { status: 400 }
+      );
+    }
+
+    const rawIdempotencyKey =
       request.headers.get('idempotency-key') ||
       request.headers.get('x-idempotency-key') ||
       rawBody.idempotency_key ||
       undefined;
+    if (rawIdempotencyKey !== undefined && typeof rawIdempotencyKey !== 'string') {
+      return NextResponse.json({ error: 'Idempotency key must be a string' }, { status: 400 });
+    }
 
     const payload: SendOtpRequest = {
-      phone,
-      template: rawBody.template,
-      code_length: rawBody.code_length,
-      expiry_seconds: rawBody.expiry_seconds,
-      idempotency_key: idempotencyKey,
-      metadata: rawBody.metadata,
+      phone: trimmedPhone,
+      code_length: rawBody.code_length as number | undefined,
+      expiry_seconds: rawBody.expiry_seconds as number | undefined,
+      idempotency_key: rawIdempotencyKey,
+      metadata: rawBody.metadata as Record<string, unknown> | undefined,
     };
 
     const result = await OtpService.sendOtp(auth.context.project, payload);
@@ -44,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         success: true,
         data: {
           challenge_id: result.body.request_id,
-          phone_number: phone,
+          phone_number: trimmedPhone,
           status: 'QUEUED',
           expires_in: result.body.expires_in,
           retry_after_seconds: result.body.resend_after,
@@ -58,11 +77,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     return NextResponse.json(result.body, { status: result.status });
-  } catch (error) {
-    console.error('API Error /api/v1/otp/send:', error);
+  } catch {
+    console.error('[API /api/v1/otp/send] Internal error');
     return NextResponse.json(
-      { error: 'Invalid JSON payload or internal error' },
-      { status: 400 }
+      { error: 'Internal server error processing OTP request' },
+      { status: 500 }
     );
   }
 }

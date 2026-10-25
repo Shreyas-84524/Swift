@@ -14,6 +14,7 @@ export type KeyEnvironment = 'live' | 'test';
 export interface ProjectConfig {
   cooldown_seconds?: number;
   hourly_limit?: number;
+  project_hourly_limit?: number;
   expiry_seconds?: number;
   max_attempts?: number;
   otp_length?: number;

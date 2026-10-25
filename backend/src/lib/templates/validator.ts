@@ -194,22 +194,24 @@ export function validateTemplate(
   let match: RegExpExecArray | null;
 
   while ((match = doubleBraceRegex.exec(body)) !== null) {
-    const rawKey = match[1].trim().toLowerCase();
+    let rawKey = match[1].trim().toLowerCase();
+    // Normalize known aliases
+    if (rawKey === 'code') rawKey = 'otp';
+    if (rawKey === 'project_name') rawKey = 'app_name';
     foundPlaceholders.add(rawKey);
   }
 
   // Check for standalone single-brace placeholders that might be unintended or legacy
   const singleBraceRegex = /(?<!\{)\{([^{}]+)\}(?!\})/g;
   while ((match = singleBraceRegex.exec(body)) !== null) {
-    const rawKey = match[1].trim().toLowerCase();
+    let rawKey = match[1].trim().toLowerCase();
     // Normalize known aliases
     if (rawKey === 'project_name') {
-      foundPlaceholders.add('app_name');
+      rawKey = 'app_name';
     } else if (rawKey === 'code') {
-      foundPlaceholders.add('otp');
-    } else {
-      foundPlaceholders.add(rawKey);
+      rawKey = 'otp';
     }
+    foundPlaceholders.add(rawKey);
   }
 
   // Verify all found placeholders are approved
@@ -266,7 +268,9 @@ export function renderTemplate(body: string, variables: PreviewOptions): string 
   return body
     // Double braces (canonical)
     .replace(/\{\{\s*otp\s*\}\}/gi, otpVal)
+    .replace(/\{\{\s*code\s*\}\}/gi, otpVal)
     .replace(/\{\{\s*app_name\s*\}\}/gi, appNameVal)
+    .replace(/\{\{\s*project_name\s*\}\}/gi, appNameVal)
     .replace(/\{\{\s*expiry_minutes\s*\}\}/gi, expiryVal)
     // Single braces (backward compatibility)
     .replace(/\{\s*otp\s*\}/gi, otpVal)

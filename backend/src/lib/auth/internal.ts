@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * Dedicated internal authorization for background outbox schedulers (Vercel Cron, Supabase Cron, etc.).
  *
  * Security Requirements:
- * 1. Dedicated secret: process.env.OUTBOX_SCHEDULER_SECRET
+ * 1. Dedicated secret: process.env.OUTBOX_SCHEDULER_SECRET (or standard Vercel CRON_SECRET)
  * 2. Header-only authorization: Authorization: Bearer <secret>
  * 3. Constant-time comparison using crypto.timingSafeEqual with SHA-256 pre-hashing
  * 4. Strict rejection if query parameters attempt to supply secrets
@@ -35,14 +35,27 @@ export function authenticateScheduler(request: NextRequest): { success: true } |
     }
   }
 
-  // 2. Secret Retrieval
-  const expectedSecret = process.env.OUTBOX_SCHEDULER_SECRET;
-  if (!expectedSecret) {
+  // 2. Secret Retrieval. Either independently configured secret is accepted so
+  // Vercel Cron and an external POST scheduler can coexist during migration.
+  const expectedSecrets = [
+    process.env.OUTBOX_SCHEDULER_SECRET,
+    process.env.CRON_SECRET,
+  ].filter((value): value is string => Boolean(value));
+  if (expectedSecrets.length === 0) {
     return {
       success: false,
       response: NextResponse.json(
         { success: false, error: 'Scheduler authentication is not configured on server' },
         { status: 401 }
+      ),
+    };
+  }
+  if (expectedSecrets.some((secret) => secret.length < 16)) {
+    return {
+      success: false,
+      response: NextResponse.json(
+        { success: false, error: 'Scheduler authentication configuration is invalid' },
+        { status: 503 }
       ),
     };
   }
@@ -60,7 +73,11 @@ export function authenticateScheduler(request: NextRequest): { success: true } |
   }
 
   const providedToken = authHeader.substring(7).trim();
-  if (!verifySchedulerSecret(providedToken, expectedSecret)) {
+  // Evaluate every configured candidate rather than stopping on the first match.
+  const isValid = expectedSecrets
+    .map((expectedSecret) => verifySchedulerSecret(providedToken, expectedSecret))
+    .reduce((matched, candidateMatched) => matched || candidateMatched, false);
+  if (!isValid) {
     return {
       success: false,
       response: NextResponse.json(

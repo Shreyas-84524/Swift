@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
       sms_template?: string;
       cooldown_seconds?: number;
       hourly_limit?: number;
+      project_hourly_limit?: number;
       expiry_seconds?: number;
     };
     const name = body.name?.trim();
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
       sms_template: body.sms_template?.trim() || 'Your verification code is {{otp}}. It expires in {{expiry_minutes}} minutes.',
       cooldown_seconds: Math.min(Math.max(Number(body.cooldown_seconds) || 30, 10), 3600),
       hourly_limit: Math.min(Math.max(Number(body.hourly_limit) || 5, 1), 100),
+      project_hourly_limit: Math.min(Math.max(Number(body.project_hourly_limit) || 100, 1), 10000),
       expiry_seconds: Math.min(Math.max(Number(body.expiry_seconds) || 300, 60), 1800),
     };
     const project = await AdminService.createProject(name, slug, config);

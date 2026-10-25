@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateGateway } from '@/lib/auth/middleware';
 import { PushTokenService, TokenValidationError } from '@/lib/push/token-service';
+import { JsonBodyError, readBoundedJsonObject } from '@/lib/http/json-body';
 import { RegisterPushTokenRequest, RegisterPushTokenResponse } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -17,9 +18,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   let rawBody: RegisterPushTokenRequest;
   try {
-    rawBody = (await request.json()) as RegisterPushTokenRequest;
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON request body' }, { status: 400 });
+    rawBody = (await readBoundedJsonObject(request)) as unknown as RegisterPushTokenRequest;
+  } catch (error) {
+    if (error instanceof JsonBodyError) {
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    }
+    throw error;
   }
 
   try {
@@ -79,7 +83,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
         count: invalidatedCount,
       },
     });
-  } catch (error: unknown) {
+  } catch {
     console.error('API Error /api/v1/gateway/push-token DELETE');
     return NextResponse.json(
       { error: 'Internal server error invalidating push token' },

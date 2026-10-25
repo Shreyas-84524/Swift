@@ -289,6 +289,37 @@ async function main() {
     console.log('  ✅ Migration 007 test data cleaned up.\n');
   }
 
+  // Step 3e: Migration 008 (Phase 5 Production Hardening & Rate-Limiting Indexes)
+  const migration008Path = path.join(rootDir, 'database', '008_phase5_hardening.sql');
+  if (fs.existsSync(migration008Path)) {
+    console.log('Applying Migration 008 (database/008_phase5_hardening.sql)...');
+    const migration008Sql = sanitizeForPglite(fs.readFileSync(migration008Path, 'utf-8'));
+    await db.exec(migration008Sql);
+    console.log('  ✅ Migration 008 applied successfully.\n');
+
+    console.log('Verifying Migration 008 Invariants (rate-limiting indexes & advisory locking)...');
+
+    // 1. Verify composite rate-limiting indexes exist
+    const idxCheck008 = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+       WHERE tablename = 'otp_challenges'
+         AND indexname IN ('idx_otp_challenges_phone_created', 'idx_otp_challenges_project_created')`
+    );
+    if (idxCheck008.rows.length < 2) {
+      throw new Error('Migration 008 failed: composite rate-limiting indexes not found in pg_indexes');
+    }
+    console.log('  ✅ Invariant Verified: composite rate-limiting indexes created (idx_otp_challenges_phone_created, idx_otp_challenges_project_created)');
+
+    // 2. Verify transactional advisory locking executes cleanly on PGlite
+    await db.query('BEGIN');
+    const lockRes = await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['rate:test-project:+919876543210']);
+    if (lockRes.rows.length !== 1) {
+      throw new Error('Migration 008 failed: pg_advisory_xact_lock did not return success');
+    }
+    await db.query('COMMIT');
+    console.log('  ✅ Invariant Verified: pg_advisory_xact_lock executes cleanly for rate limit serialization\n');
+  }
+
   // Step 4: Execute Invariant Verification Suite
   console.log('Executing Invariant Verification Suite (database/test_phase1_invariants.sql)...');
   const testSql = fs.readFileSync(testScriptPath, 'utf-8');
