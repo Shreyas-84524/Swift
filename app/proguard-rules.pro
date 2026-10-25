@@ -5,17 +5,33 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ==========================================
+# Firebase Cloud Messaging Rules
+# ==========================================
+-keep public class * extends com.google.firebase.messaging.FirebaseMessagingService {
+    public <init>();
+}
+-keep class com.google.firebase.messaging.** { *; }
+-dontwarn com.google.firebase.messaging.**
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ==========================================
+# AndroidX WorkManager Rules
+# ==========================================
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class * extends androidx.work.Worker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ==========================================
+# Gson & API Data Models
+# ==========================================
+-keepattributes Signature
+-keepattributes *Annotation*
+-keepclassmembers class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+-keep class com.multi.encription.sms.models.** { *; }
+-keep class com.multi.encription.sms.network.** { *; }
+-keep class com.multi.encription.sms.database.** { *; }

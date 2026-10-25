@@ -1,5 +1,6 @@
 package com.multi.encription.sms.telephony
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -113,6 +114,7 @@ object SubscriptionHelper {
      * Extracts non-sensitive subscription telemetry for diagnostics and logging.
      * Never logs IMSI, ICCID, phone numbers, or credentials.
      */
+    @SuppressLint("MissingPermission")
     fun getSubscriptionDiagnostics(context: Context, configManager: ConfigManager? = null): SubscriptionDiagnostics {
         var defaultSmsSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID
         var activeCount = 0

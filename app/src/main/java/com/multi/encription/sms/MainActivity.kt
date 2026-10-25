@@ -203,7 +203,11 @@ class MainActivity : AppCompatActivity() {
                 worker.syncNow()
                 Toast.makeText(this, "Manual sync triggered", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(this, "Enable Global Worker first", Toast.LENGTH_SHORT).show()
+                lifecycleScope.launch {
+                    val summary = com.multi.encription.sms.engine.JobDrainEngine.getInstance(applicationContext)
+                        .drainQueue(com.multi.encription.sms.engine.DrainSource.MANUAL_SYNC)
+                    Toast.makeText(this@MainActivity, "Manual sync: ${summary.jobsDispatched} sent, ${summary.duplicatesSkipped} skipped", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
@@ -375,26 +379,39 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Save") { _, _ ->
                 val newUrl = backendUrlEditText.text?.toString()?.trim() ?: ""
                 val newKey = gatewayKeyEditText.text?.toString()?.trim() ?: ""
+                val previousUrl = configManager.globalBackendUrl
+                val previousKey = configManager.secureStorage.getGatewayKey()
+                lifecycleScope.launch {
+                    val coordinator = com.multi.encription.sms.push.FcmTokenCoordinator.getInstance(this@MainActivity)
+                    val normalizedNewUrl = if (newUrl.isBlank()) previousUrl else configManager.normalizeBackendUrl(newUrl)
+                    val credentialsChanged =
+                        (newKey.isNotBlank() && newKey != previousKey) || normalizedNewUrl != previousUrl
 
-                if (newUrl.isNotBlank()) {
-                    configManager.globalBackendUrl = newUrl
-                }
-
-                if (newKey.isNotBlank()) {
-                    if (newKey.startsWith("otp_gw_")) {
-                        configManager.secureStorage.saveGatewayKey(newKey)
-                        Toast.makeText(this, "Gateway key saved securely", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, "Warning: Key format should be otp_gw_...", Toast.LENGTH_LONG).show()
-                        configManager.secureStorage.saveGatewayKey(newKey)
+                    // Invalidate the old registration while the old URL/key are still active.
+                    if (!previousKey.isNullOrBlank() && credentialsChanged) {
+                        coordinator.unregisterPushToken()
                     }
-                }
 
-                Toast.makeText(this, "Configuration updated", Toast.LENGTH_SHORT).show()
+                    if (newUrl.isNotBlank()) {
+                        configManager.globalBackendUrl = newUrl
+                    }
+                    if (newKey.isNotBlank()) {
+                        configManager.secureStorage.saveGatewayKey(newKey)
+                        if (!newKey.startsWith("otp_gw_")) {
+                            Toast.makeText(this@MainActivity, "Warning: Key format should be otp_gw_...", Toast.LENGTH_LONG).show()
+                        }
+                    }
+
+                    coordinator.onGatewayConfigUpdated()
+                    Toast.makeText(this@MainActivity, "Configuration updated", Toast.LENGTH_SHORT).show()
+                }
             }
             .setNeutralButton("Clear Key") { _, _ ->
-                configManager.secureStorage.clearGatewayKey()
-                Toast.makeText(this, "Gateway key cleared", Toast.LENGTH_SHORT).show()
+                lifecycleScope.launch {
+                    com.multi.encription.sms.push.FcmTokenCoordinator.getInstance(this@MainActivity).unregisterPushToken()
+                    configManager.secureStorage.clearGatewayKey()
+                    Toast.makeText(this@MainActivity, "Gateway key cleared and push token invalidated", Toast.LENGTH_SHORT).show()
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()

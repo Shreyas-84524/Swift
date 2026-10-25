@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Hardware features -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <!-- SMS Permissions -->
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
@@ -53,6 +56,16 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Firebase Cloud Messaging Service (Push Wake Trigger) -->
+        <service
+            android:name=".push.GatewayFirebaseMessagingService"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <!-- SMS Status Receiver -->
         <receiver

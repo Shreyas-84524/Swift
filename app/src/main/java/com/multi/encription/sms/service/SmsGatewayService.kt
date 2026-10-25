@@ -100,6 +100,7 @@ class SmsGatewayService : Service() {
         when (configManager.gatewayMode) {
             GatewayMode.LOCAL_API -> {
                 globalWorker?.stop()
+                com.multi.encription.sms.worker.GatewayRecoveryWorker.cancel(this)
                 if (configManager.isServerEnabled) {
                     startApiServer()
                 } else {
@@ -111,9 +112,19 @@ class SmsGatewayService : Service() {
                 stopApiServer()
                 if (configManager.isWorkerEnabled) {
                     globalWorker?.start()
-                    updateNotification("Global OTP Worker: Active & Polling")
+                    updateNotification("Global OTP Worker: Active (Event-Driven)")
+                    // Phase 3: Schedule 15-minute periodic recovery fallback and synchronize push token
+                    com.multi.encription.sms.worker.GatewayRecoveryWorker.schedule(this)
+                    serviceScope.launch {
+                        try {
+                            com.multi.encription.sms.push.FcmTokenCoordinator.getInstance(this@SmsGatewayService).syncToken()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Push token sync deferred: ${e.message}")
+                        }
+                    }
                 } else {
                     globalWorker?.stop()
+                    com.multi.encription.sms.worker.GatewayRecoveryWorker.cancel(this)
                     updateNotification("Global OTP Worker: Paused")
                 }
             }
